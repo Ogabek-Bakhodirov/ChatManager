@@ -143,14 +143,27 @@ function visibleTree(nodes, hideDone) {
   if (!hideDone) return nodes;
 
   const byId = new Map(nodes.map((n) => [n.id, n]));
-  const keep = nodes.filter((n) => n.status !== "done");
-  const kept = new Set(keep.map((n) => n.id));
 
-  return keep.map((n) => {
+  // 1-qadam: tugallanmagan tugunlar. Bular har doim ko'rinadi.
+  const open = nodes.filter((n) => n.status !== "done");
+
+  // 2-qadam: ularning BARCHA ajdodlari. `done` ota ostida ochiq farzand
+  // bo'lsa, ota aslida tugallanmagan — uni yashirish nomuvofiqlikni
+  // ko'zdan pana qiladi va farzand qaysi bosqichga tegishli ekani yo'qoladi.
+  // Shuning uchun ota qoladi, lekin `ctx` bilan xiralashtiriladi.
+  const keep = new Set(open.map((n) => n.id));
+  for (const n of open) {
     let p = n.parent_id, guard = 0;
-    while (p && !kept.has(p) && guard++ < 50) p = byId.get(p)?.parent_id ?? null;
-    return p === n.parent_id ? n : { ...n, parent_id: p ?? null };
-  });
+    while (p && !keep.has(p) && guard++ < 50) {
+      keep.add(p);
+      p = byId.get(p)?.parent_id ?? null;
+    }
+  }
+
+  // 3-qadam: qolganlarni belgilaymiz. `ctx` — "faqat kontekst uchun turibdi".
+  return nodes
+    .filter((n) => keep.has(n.id))
+    .map((n) => (n.status === "done" ? { ...n, ctx: true } : n));
 }
 
 /* ====================================================================== */
@@ -274,7 +287,8 @@ function timeAgo(iso) {
 
 function Node({ n, x, y, selected, fresh, onClick }) {
   const cls = [
-    "node", `s-${n.status}`, n.is_ghost ? "ghost" : "", selected ? "sel" : "", fresh ? "fresh" : "",
+    "node", `s-${n.status}`, n.is_ghost ? "ghost" : "", n.ctx ? "ctx" : "",
+    selected ? "sel" : "", fresh ? "fresh" : "",
   ].filter(Boolean).join(" ");
   return html`
     <div class=${cls} style=${{ left: x + "px", top: y + "px" }} onClick=${() => onClick(n)}>
@@ -283,6 +297,7 @@ function Node({ n, x, y, selected, fresh, onClick }) {
         <span class=${"chip s-" + n.status}>${STATUS_EN[n.status] ?? n.status}</span>
         ${n.type === "milestone" ? html`<span class="chip">Milestone</span>` : null}
         ${n.is_ghost ? html`<span class="chip">Guess</span>` : null}
+        ${n.ctx ? html`<span class="chip">Has open work</span>` : null}
       </div>
     </div>`;
 }

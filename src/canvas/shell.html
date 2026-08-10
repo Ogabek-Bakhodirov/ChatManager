@@ -360,6 +360,13 @@ input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px 
 .node.s-blocked    { border-left-color: var(--block); }
 .node.s-cancelled  { border-left-color: var(--cancel); opacity: .5; }
 .node.ghost { border-style: dashed; opacity: .62; }
+
+/* `Hide completed` yoqilganda: bajarilgan, LEKIN ostida ochiq ish turgan
+   tugun. Yo'qolmaydi, chunki farzandlari uning ostida turishi kerak —
+   ammo kontekst ekani ko'rinib tursin. */
+.node.ctx { opacity: .5; box-shadow: none; }
+.node.ctx:hover { opacity: 1; }
+.node.ctx .n-title { font-weight: 500; }
 .node.s-in_progress { animation: glow 2.6s ease-in-out infinite; }
 @keyframes glow {
   0%,100% { box-shadow: var(--shadow-sm) }
