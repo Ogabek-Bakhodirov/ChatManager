@@ -166,6 +166,34 @@ function visibleTree(nodes, hideDone) {
     .map((n) => (n.status === "done" ? { ...n, ctx: true } : n));
 }
 
+/* ======================================================================= */
+/*  Loyiha tuguni — daraxtning yagona ildizi                                */
+/*                                                                        */
+/*  BAZADA SAQLANMAYDI, render paytida yasaladi. Ikki sabab: extractor     */
+/*  unga hech qachon yozib qo'ymasin, va loyiha nomi o'zgarganda           */
+/*  migratsiya kerak bo'lmasin.                                           */
+/* ======================================================================= */
+const PROJECT_ID = "__project__";
+
+function withProjectRoot(nodes, name, counts) {
+  if (!name || nodes.length === 0) return nodes;
+
+  const root = {
+    id: PROJECT_ID,
+    parent_id: null,
+    title: name,
+    synthetic: true,
+    position: -1,
+    open: (counts.todo ?? 0) + (counts.in_progress ?? 0) + (counts.blocked ?? 0),
+    done: counts.done ?? 0,
+  };
+
+  return [
+    root,
+    ...nodes.map((n) => (n.parent_id ? n : { ...n, parent_id: PROJECT_ID })),
+  ];
+}
+
 /* ====================================================================== */
 /*  Brend belgisi — ikkita qavs va bitta tugun                             */
 /*                                                                        */
@@ -286,6 +314,18 @@ function timeAgo(iso) {
 }
 
 function Node({ n, x, y, selected, fresh, onClick }) {
+  // Loyiha tuguni: bosilmaydi, statusi yo'q — u ish emas, sarlavha.
+  if (n.synthetic) {
+    return html`
+      <div class="node proj" style=${{ left: x + "px", top: y + "px" }}>
+        <div class="n-title"><${Icon} n="folder" />${n.title}</div>
+        <div class="n-meta">
+          <span class="chip">Project</span>
+          <span>${n.open} open · ${n.done} done</span>
+        </div>
+      </div>`;
+  }
+
   const cls = [
     "node", `s-${n.status}`, n.is_ghost ? "ghost" : "", n.ctx ? "ctx" : "",
     selected ? "sel" : "", fresh ? "fresh" : "",
@@ -1022,7 +1062,10 @@ function App() {
   }
 
   const counts = nodes.reduce((a, n) => { a[n.status] = (a[n.status] ?? 0) + 1; return a; }, {});
-  const shown = visibleTree(nodes, hideDone);
+  const activeName = projects.find((p) => p.id === activeId)?.name ?? "";
+  const vis = visibleTree(nodes, hideDone);
+  const hidden = nodes.length - vis.length;
+  const shown = withProjectRoot(vis, activeName, counts);
 
   return html`
     <div class="app">
@@ -1061,9 +1104,9 @@ function App() {
                      onPick=${(id) => { setActiveId(id); setSelected(null); }}
                      onNew=${demo ? () => say("Creating projects is disabled in demo mode") : newProject}
                      onCopy=${copyPhrase} onRecovery=${copyRecovery} />
-        <${Canvas} key=${activeId + ":" + (hideDone ? "1" : "0")}
+        <${Canvas} key=${activeId + ":" + (hideDone ? "1" : "0") + ":" + activeName}
                    nodes=${shown} selected=${selected} onSelect=${setSelected}
-                   freshIds=${freshIds.current} hiddenCount=${nodes.length - shown.length} />
+                   freshIds=${freshIds.current} hiddenCount=${hidden} />
         <${Side} selected=${selected} events=${events} chats=${chats} loading=${loading}
                  open=${rightOpen} onToggle=${setRightOpen}
                  sb=${sb} demo=${demo} onEnableRaw=${enableStoreRaw}

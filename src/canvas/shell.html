@@ -367,6 +367,21 @@ input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px 
 .node.ctx { opacity: .5; box-shadow: none; }
 .node.ctx:hover { opacity: 1; }
 .node.ctx .n-title { font-weight: 500; }
+
+/* Loyiha tuguni — daraxtning ildizi. Ish emas, shuning uchun statusi ham,
+   bosish imkoni ham yo'q. Aksent chekkasi bilan ajratiladi. */
+.node.proj {
+  background: var(--panel); border-color: var(--line-strong);
+  border-left: 2px solid var(--accent); cursor: default; box-shadow: var(--shadow-md);
+}
+.node.proj:hover { border-color: var(--line-strong); box-shadow: var(--shadow-md); }
+.node.proj .n-title {
+  display: flex; align-items: center; gap: 9px; font-size: 14px; font-weight: 600;
+  letter-spacing: -.01em; -webkit-line-clamp: 2; line-clamp: 2;
+}
+.node.proj .n-title svg { color: var(--accent); }
+.node.proj .n-meta { color: var(--faint); }
+.node.proj .chip { background: var(--accent-soft); color: var(--accent); }
 .node.s-in_progress { animation: glow 2.6s ease-in-out infinite; }
 @keyframes glow {
   0%,100% { box-shadow: var(--shadow-sm) }
