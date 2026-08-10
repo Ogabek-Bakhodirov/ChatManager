@@ -132,6 +132,40 @@ function Icon({ n }) {
 }
 
 /* ====================================================================== */
+/*  Brend belgisi — ikkita qavs va bitta tugun                             */
+/*                                                                        */
+/*  Qavslar `currentColor` oladi, shuning uchun belgi mavzu bilan birga    */
+/*  o'zi ag'dariladi — ikkita nusxa saqlash shart emas.                    */
+/*  Aksent FAQAT tugun kvadratida. Boshqa joyda aksent ishlatish brend     */
+/*  varag'ida aniq taqiqlangan.                                           */
+/*                                                                        */
+/*  tiny — 20px dan kichik o'lchamlar uchun: qisqaroq qo'llar, qalinroq    */
+/*  chiziq, aks holda siluet ivib ketadi.                                  */
+/* ====================================================================== */
+function Mark({ size = 22, tiny = false }) {
+  const w = tiny ? 1.8 : 1.6;
+  const left = tiny
+    ? "M7.6 4.4H5.2a.9.9 0 0 0-.9.9v9.4c0 .5.4.9.9.9h2.4"
+    : "M7.4 3.2H4.4a1 1 0 0 0-1 1v11.6a1 1 0 0 0 1 1h3";
+  const right = tiny
+    ? "M12.4 4.4h2.4c.5 0 .9.4.9.9v9.4a.9.9 0 0 1-.9.9h-2.4"
+    : "M12.6 3.2h3a1 1 0 0 1 1 1v11.6a1 1 0 0 1-1 1h-3";
+  const stroke = {
+    fill: "none", stroke: "currentColor", strokeWidth: w,
+    strokeLinecap: "round", strokeLinejoin: "round",
+  };
+  return html`
+    <svg class="cm-mark" viewBox="0 0 20 20" width=${size} height=${size}
+         role="img" aria-label="Chat Manager">
+      <path d=${left} ...${stroke} />
+      <path d=${right} ...${stroke} />
+      <rect x=${tiny ? 8 : 8.1} y=${tiny ? 8 : 8.1}
+            width=${tiny ? 4 : 3.8} height=${tiny ? 4 : 3.8} rx="1.2"
+            fill="var(--accent)" />
+    </svg>`;
+}
+
+/* ====================================================================== */
 /*  Mavzu                                                                  */
 /* ====================================================================== */
 function readTheme() {
@@ -723,15 +757,14 @@ function Gate({ onReady, initial, theme, onTheme }) {
     <div class="gate">
       <div class="card">
         <div class="mark">
-          <${Icon} n="spark" />
-          <span style=${{ fontWeight: 650, letterSpacing: "-.01em", color: "var(--text)" }}>
-            Chat <span style=${{ color: "var(--accent)" }}>Manager</span>
-          </span>
-          <span class="spacer" style=${{ flex: 1 }}></span>
+          <${Mark} size=${30} />
+          <span class="wm">Chat Manager</span>
+          <span style=${{ flex: 1 }}></span>
           <button class="icon ghost" title="Toggle theme" onClick=${onTheme}>
             <${Icon} n=${theme === "light" ? "moon" : "sun"} />
           </button>
         </div>
+        <div class="tag">Tasks, out of the chat</div>
         <h1>Sign in</h1>
         <p>Connect your Supabase account to open your live task canvas.
            Or take a look around with sample data first.</p>
@@ -940,7 +973,7 @@ function App() {
   return html`
     <div class="app">
       <div class="top">
-        <div class="brand">Chat <span>Manager</span></div>
+        <div class="brand"><${Mark} size=${22} /><span class="wm">Chat Manager</span></div>
         <div class="stats">
           <span><b>${nodes.length}</b> nodes</span>
           <span><i class="sq" style=${{ background: "var(--done)" }}></i><b>${counts.done ?? 0}</b> done</span>

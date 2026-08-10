@@ -69,7 +69,7 @@ interface Session {
 
 // Qaysi versiya jonli ekanini javobdan bilish uchun. Deploy qilinganini
 // tekshirishning eng oddiy yo'li.
-const VERSION = "0.8.0";
+const VERSION = "0.9.0";
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), {
@@ -344,7 +344,7 @@ Deno.serve(async (req: Request) => {
   const a = await callJson<{ items: Item[] }>(
     PASS_A_SYSTEM,
     passAUser(deltaText),
-    { apiKey, maxTokens: 3000 },
+    { apiKey, maxTokens: 8000 },   // note qo'shilgach 3000 yetmay qoldi
   );
 
   let inTok = a.inputTokens, outTok = a.outputTokens, cost = a.costUsd;
@@ -378,7 +378,7 @@ Deno.serve(async (req: Request) => {
     const r = await callJson<{ items: Item[] }>(
       PASS_A_RETRY_SYSTEM,
       passARetryUser(deltaText, gapIds, gapLines),
-      { apiKey, maxTokens: 1500 },
+      { apiKey, maxTokens: 3000 },
     );
     inTok += r.inputTokens;
     outTok += r.outputTokens;
@@ -425,7 +425,7 @@ Deno.serve(async (req: Request) => {
     const st = await callJson<{ placements: { item_index: number; parent_index: number | null }[] }>(
       PASS_B_STRUCTURE_SYSTEM,
       passBStructureUser(items.map((it, i) => ({ i, title: it.title, hint: it.parent_hint }))),
-      { apiKey, maxTokens: 1500 },
+      { apiKey, maxTokens: 2500 },
     );
     inTok += st.inputTokens;
     outTok += st.outputTokens;
@@ -448,7 +448,7 @@ Deno.serve(async (req: Request) => {
     const b = await callJson<{ placements: Placement[] }>(
       PASS_B_SYSTEM,
       passBUser(tree, items.map((it, i) => ({ i, title: it.title, hint: it.parent_hint }))),
-      { apiKey, maxTokens: 2000 },
+      { apiKey, maxTokens: 4000 },
     );
     inTok += b.inputTokens;
     outTok += b.outputTokens;
