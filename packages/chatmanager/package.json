@@ -1,0 +1,15 @@
+{
+  "name": "chatmanager",
+  "version": "0.1.0",
+  "description": "Chat Manager hook adapteri — Claude Code suhbatidan task daraxtini avtomatik yig'adi",
+  "type": "module",
+  "bin": {
+    "chatmanager": "bin/chatmanager.js"
+  },
+  "files": ["bin", "lib", "README.md"],
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "MIT",
+  "private": false
+}

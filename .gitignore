@@ -1,0 +1,13 @@
+# --- maxfiy ---
+claude_desktop_config.json      # ichida connect token bor
+.env
+.env.*
+*.pem
+
+# --- lokal/vaqtinchalik ---
+_local/
+supabase/.temp/
+.vercel/
+node_modules/
+*.tar.gz
+.DS_Store

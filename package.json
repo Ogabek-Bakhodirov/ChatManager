@@ -1,0 +1,17 @@
+{
+  "name": "chat-manager",
+  "version": "0.6.0",
+  "private": true,
+  "type": "module",
+  "description": "AI suhbatidan task daraxtini avtomatik yig'adigan tizim",
+  "scripts": {
+    "build:canvas": "node src/canvas/build.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "htm": "^3.1.1",
+    "@supabase/supabase-js": "^2.45.0"
+  }
+}
