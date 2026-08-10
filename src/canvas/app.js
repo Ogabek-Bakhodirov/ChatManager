@@ -131,6 +131,28 @@ function Icon({ n }) {
                 dangerouslySetInnerHTML=${{ __html: ICO[n] ?? "" }} />`;
 }
 
+/* ======================================================================= */
+/*  Bajarilganlarni yashirish                                              */
+/*                                                                        */
+/*  Tugunni shunchaki ro'yxatdan olib tashlash yetmaydi: bajarilgan ota    */
+/*  tugun ostida hali ochiq farzandlar bo'lishi mumkin va ular ildizga     */
+/*  sochilib ketardi. Shuning uchun har bir ochiq tugun eng yaqin          */
+/*  KO'RINADIGAN ajdodiga ulanadi.                                        */
+/* ======================================================================= */
+function visibleTree(nodes, hideDone) {
+  if (!hideDone) return nodes;
+
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+  const keep = nodes.filter((n) => n.status !== "done");
+  const kept = new Set(keep.map((n) => n.id));
+
+  return keep.map((n) => {
+    let p = n.parent_id, guard = 0;
+    while (p && !kept.has(p) && guard++ < 50) p = byId.get(p)?.parent_id ?? null;
+    return p === n.parent_id ? n : { ...n, parent_id: p ?? null };
+  });
+}
+
 /* ====================================================================== */
 /*  Brend belgisi — ikkita qavs va bitta tugun                             */
 /*                                                                        */
@@ -265,7 +287,7 @@ function Node({ n, x, y, selected, fresh, onClick }) {
     </div>`;
 }
 
-function Canvas({ nodes, selected, onSelect, freshIds }) {
+function Canvas({ nodes, selected, onSelect, freshIds, hiddenCount = 0 }) {
   const stage = useRef(null);
   const [view, setView] = useState({ x: 60, y: 40, k: 1 });
   // Gesture eslatmasi faqat birinchi tashrifda. Har safar chiqsa u yuqoridagi
@@ -413,9 +435,11 @@ function Canvas({ nodes, selected, onSelect, freshIds }) {
 
       ${nodes.length === 0
         ? html`<div class="empty" style=${{ position: "absolute", inset: 0, justifyContent: "center" }}>
-                 <span class="ico"><${Icon} n="spark" /></span>
-                 <span class="h">No nodes yet</span>
-                 <span class="p">Keep working in your connected chats — the tree grows here on its own.</span>
+                 <span class="ico"><${Icon} n=${hiddenCount ? "check" : "spark"} /></span>
+                 <span class="h">${hiddenCount ? "Everything is done" : "No nodes yet"}</span>
+                 <span class="p">${hiddenCount
+                   ? `All ${hiddenCount} tasks are complete. Turn off "Hide completed" to see them.`
+                   : "Keep working in your connected chats — the tree grows here on its own."}</span>
                </div>`
         : null}
     </div>`;
@@ -807,6 +831,9 @@ function App() {
   const [leftOpen, setLeftOpen] = useState(true);
   const [rightOpen, setRightOpen] = useState(true);
   const [loading, setLoading] = useState(false);
+  const [hideDone, setHideDone] = useState(() => {
+    try { return localStorage.getItem("cm_hide_done") === "1"; } catch { return false; }
+  });
   const freshIds = useRef(new Set());
   const [, bump] = useState(0);
 
@@ -817,6 +844,14 @@ function App() {
   };
 
   const say = (m) => { setToast(m); setTimeout(() => setToast(null), 2600); };
+
+  const toggleHideDone = useCallback(() => {
+    setHideDone((v) => {
+      const next = !v;
+      try { localStorage.setItem("cm_hide_done", next ? "1" : "0"); } catch { /* ignore */ }
+      return next;
+    });
+  }, []);
 
   // DIQQAT: yon ta'sirni setState updateri ICHIGA qo'ymang. React updater
   // funksiyasini bir necha marta chaqirishi mumkin (eager evaluation), shunda
@@ -921,6 +956,10 @@ function App() {
       "Recovery prompt copied — send it to the chat that lost tasks",
     ), [copyText]);
 
+  useEffect(() => {
+    if (hideDone && selected && selected.status === "done") setSelected(null);
+  }, [hideDone, selected]);
+
   useEffect(() => { if (sb) loadProjects(sb); }, [sb, loadProjects]);
   useEffect(() => { if (sb && activeId) loadTree(sb, activeId); }, [sb, activeId, loadTree]);
 
@@ -968,7 +1007,7 @@ function App() {
   }
 
   const counts = nodes.reduce((a, n) => { a[n.status] = (a[n.status] ?? 0) + 1; return a; }, {});
-  const activeName = projects.find((p) => p.id === activeId)?.name ?? "";
+  const shown = visibleTree(nodes, hideDone);
 
   return html`
     <div class="app">
@@ -983,7 +1022,11 @@ function App() {
             : null}
         </div>
         <div class="spacer"></div>
-        ${activeName ? html`<div class="crumb"><${Icon} n="folder" /><b>${activeName}</b></div>` : null}
+        <label class="switch" title="Hide every node whose status is Done">
+          <input type="checkbox" checked=${hideDone} onChange=${toggleHideDone} />
+          <span class="track"><span class="knob"></span></span>
+          <span class="lbl">Hide completed tasks</span>
+        </label>
         <div class="live">
           <span class=${"dot " + (demo ? "off" : live ? "live" : "off")}></span>
           ${demo ? "Demo" : live ? "Live" : "Connecting"}
@@ -1003,8 +1046,9 @@ function App() {
                      onPick=${(id) => { setActiveId(id); setSelected(null); }}
                      onNew=${demo ? () => say("Creating projects is disabled in demo mode") : newProject}
                      onCopy=${copyPhrase} onRecovery=${copyRecovery} />
-        <${Canvas} key=${activeId} nodes=${nodes} selected=${selected} onSelect=${setSelected}
-                   freshIds=${freshIds.current} />
+        <${Canvas} key=${activeId + ":" + (hideDone ? "1" : "0")}
+                   nodes=${shown} selected=${selected} onSelect=${setSelected}
+                   freshIds=${freshIds.current} hiddenCount=${nodes.length - shown.length} />
         <${Side} selected=${selected} events=${events} chats=${chats} loading=${loading}
                  open=${rightOpen} onToggle=${setRightOpen}
                  sb=${sb} demo=${demo} onEnableRaw=${enableStoreRaw}
