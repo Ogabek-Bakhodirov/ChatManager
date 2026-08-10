@@ -13,7 +13,7 @@
 // ============================================================================
 
 const PROTOCOL_VERSION = "2025-06-18";
-const SERVER_VERSION = "0.4.0";
+const SERVER_VERSION = "0.5.0";
 
 interface RpcReq {
   jsonrpc: string;
@@ -60,7 +60,10 @@ const TOOLS = [
       "CHAQIR: biror ish bajarilganda ('bajardim', 'tayyor', 'ishladi'), yangi task yoki " +
       "bosqich paydo bo'lganda, roadmap tuzilganda yoki o'zgarganda, ish bekor qilinganda. " +
       "Javobni yakunlashdan OLDIN chaqir. Bir javobda bir marta yetarli.\n\n" +
-      "CHAQIRMA: oddiy savol-javob, tushuntirish, variantlarni muhokama qilishda.",
+      "CHAQIRMA: oddiy savol-javob, tushuntirish, variantlarni muhokama qilishda.\n\n" +
+      "QAMROV: agar oxirgi syncdan beri vaqt o'tgan bo'lsa (javobdagi " +
+      "`minutes_since_sync` ni ko'r), `text` ga o'sha butun davrni sol — " +
+      "faqat oxirgi javobni emas.",
     inputSchema: {
       type: "object",
       properties: {
@@ -150,13 +153,22 @@ Deno.serve(async (req: Request) => {
       capabilities: { tools: { listChanged: false } },
       serverInfo: { name: "chat-manager", version: SERVER_VERSION },
       instructions:
-        "Chat Manager suhbatdagi tasklarni daraxt shaklida saqlaydi.\n\n" +
-        "1. Task/reja mavzusi ochilganda: agar bu suhbat hali ulanmagan bo'lsa " +
-        "`chat_manager_projects` → `chat_manager_link` (label bilan). Javobdagi " +
-        "`chat_ref` ni eslab qol.\n" +
-        "2. Har safar biror ish bajarilganda yoki yangi task paydo bo'lganda " +
-        "`chat_manager_sync` ni chaqir va `chat_ref` ni ham yubor.\n" +
-        "3. Foydalanuvchidan ruxsat so'rama — bu tizimning ma'nosi avtomatlikda.",
+        "Chat Manager suhbatdagi tasklarni daraxt shaklida saqlaydi. Quyidagilar " +
+        "shu suhbat davomida amal qiladigan QAT'IY qoidalar.\n\n" +
+        "1. ULASH. Task, reja yoki roadmap mavzusi ochilganda: suhbatda " +
+        "`Chat Manager: ula → <nom> (<uuid>)` iborasi bo'lsa — o'sha uuid bilan " +
+        "`chat_manager_link` ni chaqir, so'ramasdan. Ibora bo'lmasa avval " +
+        "`chat_manager_tree` bilan tekshir. Javobdagi `chat_ref` ni ESLAB QOL.\n\n" +
+        "2. SYNC. Javobingni yakunlashdan OLDIN o'zingdan so'ra: shu javobda biror " +
+        "ish bajarildimi, rejalashtirildimi, to'sildimi yoki bekor qilindimi? " +
+        "Ha bo'lsa — `chat_manager_sync` ni chaqir. Shubha bo'lsa CHAQIR: ortiqcha " +
+        "sync zararsiz, tushib qolgan ish esa butunlay yo'qoladi.\n\n" +
+        "3. QAMROV — eng muhimi. Har `sync` javobida `minutes_since_sync` qaytadi. " +
+        "U 0 dan katta bo'lsa, `text` ga FAQAT oxirgi javobni emas, o'sha " +
+        "davrdagi BARCHA ishni sol. Chastota emas, qamrov muhim: kamdan-kam " +
+        "sync qilsang ham, har biri butun tanaffusni yopsa hech narsa yo'qolmaydi.\n\n" +
+        "4. Foydalanuvchidan ruxsat SO'RAMA va sync qilganingni har safar " +
+        "e'lon qilma — bu tizimning ma'nosi ko'rinmas ishlashda.",
     });
   }
 
@@ -204,6 +216,18 @@ Deno.serve(async (req: Request) => {
 
   const refLine = (ref: unknown) =>
     ref ? `\n\nchat_ref: ${ref} — keyingi chaqiruvlarda shuni yubor.` : "";
+
+  // Tanaffus ogohlantirishi. Model o'zi vaqtni bilmaydi — server aytadi.
+  // Tanaffus uzayganda ohang kuchayadi.
+  const gapLine = (min: unknown) => {
+    const m = Number(min);
+    if (!Number.isFinite(m) || m < 15) return "";
+    if (m < 45) {
+      return `\n\n⏱ Oxirgi sync ${m} daqiqa oldin edi — keyingi sync o'sha davrni ham qamrasin.`;
+    }
+    return `\n\n⚠️ Oxirgi sync ${m} daqiqa oldin edi. Bu uzoq tanaffus: hozir o'sha ` +
+      `davrda qilingan BARCHA ishni bitta sync bilan yubor, keyin davom et.`;
+  };
 
   try {
     /* -------------------------------------------------------- projects -- */
@@ -268,7 +292,7 @@ Deno.serve(async (req: Request) => {
       const tree = String(r.body.tree ?? "").trim();
       return ok(id, text(
         `${r.body.project_name ?? "Loyiha"}:\n\n${tree || "(daraxt hali bo'sh)"}` +
-          refLine(r.body.chat_ref),
+          refLine(r.body.chat_ref) + gapLine(r.body.minutes_since_sync),
       ));
     }
 
@@ -289,6 +313,7 @@ Deno.serve(async (req: Request) => {
 
       const cur = Number(st.body.cursor_seq ?? 0);
       const ref = String(st.body.chat_ref ?? "");
+      const gapBefore = st.body.minutes_since_sync;
 
       const r = await call({
         action: "sync",
@@ -315,7 +340,10 @@ Deno.serve(async (req: Request) => {
             (ghosts ? `, ${ghosts} taxmin` : "") +
             (recovered ? `, ${recovered} band to'rdan tiklandi` : "")) +
           `\n\n${String(tree.body.tree ?? "").trim()}` +
-          refLine(ref),
+          refLine(ref) +
+          (Number(gapBefore) >= 45
+            ? `\n\n(${gapBefore} daqiqalik tanaffus yopildi)`
+            : ""),
       ));
     }
 

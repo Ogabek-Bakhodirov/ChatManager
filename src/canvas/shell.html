@@ -516,6 +516,60 @@ input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px 
   border: 1px dashed var(--line-strong); border-radius: 6px; padding: 3px 8px; cursor: pointer;
 }
 .devlink:hover { color: var(--text); }
+
+/* ============================================================
+   INTEGRATSIYA QO'SHIMCHASI — yig'iladigan bo'limlar, tugun
+   xulosasi va suhbat parchasi. Barcha rang o'zgaruvchidan.
+   ============================================================ */
+
+/* yig'iladigan sarlavha */
+.left h3.tog, .side h3.tog { cursor: pointer; user-select: none; }
+.left h3.tog:hover, .side h3.tog:hover { color: var(--muted); }
+h3 .chev {
+  display: inline-flex; color: var(--faint); margin-left: -3px;
+  transition: transform .18s cubic-bezier(.2,.7,.3,1);
+}
+h3 .chev.on { transform: rotate(90deg); }
+h3.tog:hover .chev { color: var(--text-dim); }
+
+/* tugun xulosasi — "nima qaror qilindi va nega" */
+.concl {
+  margin: 12px 0 0; padding: 11px 12px; border-radius: 9px;
+  background: var(--panel-2); border: 1px solid var(--line-soft);
+  font-size: 12.5px; line-height: 1.6; color: var(--text-dim);
+  overflow-wrap: anywhere; white-space: pre-wrap;
+}
+.lbl-sm {
+  display: block; margin: 16px 0 0; font-size: 10.5px; letter-spacing: .1em;
+  text-transform: uppercase; color: var(--faint); font-weight: 600;
+}
+
+/* suhbat parchasi */
+.ctxbtn { margin-top: 12px; width: 100%; justify-content: center; }
+.ctx { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; }
+.ctx .msg {
+  padding: 9px 11px; border-radius: 9px; border: 1px solid var(--line-soft);
+  background: var(--panel-2); font-size: 12px; line-height: 1.55;
+  color: var(--muted); overflow-wrap: anywhere; white-space: pre-wrap;
+}
+.ctx .msg.anchor {
+  border-color: var(--accent-line); background: var(--accent-soft); color: var(--text-dim);
+}
+.ctx .who {
+  display: block; font-size: 10px; letter-spacing: .09em; text-transform: uppercase;
+  color: var(--faint); font-weight: 600; margin-bottom: 5px;
+}
+.ctx .msg.anchor .who { color: var(--accent); }
+.ctx .msg.empty-body { color: var(--faint); font-style: italic; }
+
+/* xom matn saqlanmagan holat */
+.rawoff {
+  margin-top: 12px; padding: 11px 12px; border-radius: 9px;
+  background: var(--panel-2); border: 1px dashed var(--line-strong);
+  font-size: 11.5px; line-height: 1.55; color: var(--muted);
+}
+.rawoff button { margin-top: 9px; width: 100%; justify-content: center; }
+.rawoff b { color: var(--text-dim); font-weight: 600; }
 </style>
 <script>
 // Mavzu React yuklanishidan OLDIN qo'yiladi — aks holda sahifa bir lahza

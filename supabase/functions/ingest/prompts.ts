@@ -29,10 +29,33 @@ options being compared, greetings, praise.
 
 {"items":[{"title":"<=60 chars, imperative, SAME LANGUAGE AS THE MESSAGES",
            "status":"done|in_progress|todo|cancelled",
+           "note":"2-3 sentences, <=600 chars, SAME LANGUAGE AS THE MESSAGES",
            "parent_hint":"short phrase naming the bigger thing this belongs to, or null",
            "confidence":0.0-1.0,
            "evidence":"<=200 char quote",
            "evidence_message_id":"the id of the message the quote came from"}]}
+
+## \`note\` — what makes this item recallable weeks later
+
+The title is a label. The note is the memory. Someone opening this months from now,
+with no access to the conversation, must be able to read the note and know where things
+stood without re-reading anything.
+
+Write 2-3 sentences covering whichever of these the messages actually contain:
+
+- **What was decided or done**, concretely. Names, numbers, versions, file names.
+- **Why** — the reasoning, the constraint, the thing that was ruled out.
+- **What it depends on or is blocked by**, if anything.
+
+Weak note: "Fixed the cursor bug."
+Strong note: "The parser crashed when a session resumed mid-stream because the SDK emits
+no resume event. Decided to wait for SDK 2.1 rather than patch around it, since the
+workaround would have to be removed again. Blocked until that release."
+
+Do not restate the title. Do not speculate about anything the messages do not say. If the
+messages genuinely contain nothing beyond the title, write one honest sentence of context
+rather than padding — but that should be rare, because conversations almost always carry
+the reasoning along with the work.
 
 ## Phases and granularity — this shapes the whole tree
 
@@ -189,8 +212,9 @@ Rules:
   a measurement, a greeting, a question, an option that was rejected — skip it. Returning
   an empty list is a correct answer.
 
-Output the same shape as before:
-{"items":[{"title":"...","status":"done|in_progress|todo|cancelled",
+Output the same shape as before, including \`note\` — 2-3 sentences saying what was
+decided or done and why, in the language of the messages:
+{"items":[{"title":"...","status":"done|in_progress|todo|cancelled","note":"...",
            "parent_hint":"...","confidence":0.0-1.0,"evidence":"<=200 char quote",
            "evidence_message_id":"..."}]}
 

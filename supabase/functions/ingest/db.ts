@@ -50,6 +50,20 @@ export class Db {
     }
   }
 
+  /** Oddiy select — RPC yozmasdan bitta ustunni olish uchun */
+  async select<T>(path: string): Promise<T[]> {
+    try {
+      const res = await fetch(`${this.#url}/rest/v1/${path}`, {
+        headers: this.#headers(),
+        signal: AbortSignal.timeout(10000),
+      });
+      if (!res.ok) return [];
+      return (await res.json()) as T[];
+    } catch {
+      return [];
+    }
+  }
+
   async insert(table: string, row: Record<string, unknown>): Promise<void> {
     try {
       await fetch(`${this.#url}/rest/v1/${table}`, {

@@ -37,6 +37,7 @@ interface InMessage {
 interface Item {
   title: string;
   status?: string;
+  note?: string;              // 2-3 gapli xulosa — canvas'da "nima qaror qilindi"
   parent_hint?: string | null;
   confidence?: number;
   evidence?: string;
@@ -68,7 +69,7 @@ interface Session {
 
 // Qaysi versiya jonli ekanini javobdan bilish uchun. Deploy qilinganini
 // tekshirishning eng oddiy yo'li.
-const VERSION = "0.5.0";
+const VERSION = "0.7.0";
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), {
@@ -201,6 +202,11 @@ Deno.serve(async (req: Request) => {
   }
   const s = sess.data[0];
 
+  // Oxirgi sync qachon bo'lgani — model tanaffusni o'zi ko'rib, qamrovni
+  // shunga qarab tanlashi uchun. Chastotani majburlashdan ko'ra qamrovni
+  // majburlash osonroq bajariladi.
+  const gapMin = await minutesSinceSync(db, s.out_session_id);
+
   if (action === "tree") {
     if (!s.out_project_id) {
       return json({
@@ -218,6 +224,7 @@ Deno.serve(async (req: Request) => {
       project_id: s.out_project_id,
       project_name: s.out_project_name,
       status: s.out_status,
+      minutes_since_sync: gapMin,
       tree: t.data ?? "(bo'sh)",
     });
   }
@@ -234,6 +241,7 @@ Deno.serve(async (req: Request) => {
       cursor_seq: s.out_cursor_seq,
       resolved_by: s.out_resolved_by,
       scope: s.out_scope,
+      minutes_since_sync: gapMin,
     });
   }
 
@@ -453,14 +461,20 @@ Deno.serve(async (req: Request) => {
     );
 
     if (p.decision === "match" && p.node_id) {
+      // Mavjud tugun. Status o'zgargan bo'lsa set_status, aks holda faqat
+      // xulosani boyitish uchun annotate. Ilgari status yo'q bo'lsa op umuman
+      // yaratilmasdi va yangi kelgan xulosa yo'qolib ketardi.
+      const base = {
+        node_id: p.node_id,
+        confidence: conf,
+        note: it.note?.slice(0, 800),
+        evidence: it.evidence?.slice(0, 200),
+        evidence_message_id: it.evidence_message_id ?? null,
+      };
       if (it.status) {
-        ops.push({
-          op: "set_status",
-          node_id: p.node_id,
-          status: it.status,
-          confidence: conf,
-          evidence: it.evidence?.slice(0, 200),
-        });
+        ops.push({ op: "set_status", status: it.status, ...base });
+      } else if (base.note || base.evidence) {
+        ops.push({ op: "annotate", ...base });
       }
     } else {
       const pIdx = normalizeParentIndex(p.parent_index, i, byIndex, items.length);
@@ -473,6 +487,7 @@ Deno.serve(async (req: Request) => {
         type: guessType(it),
         status: it.status ?? "todo",
         confidence: conf,
+        note: it.note?.slice(0, 800),
         evidence: it.evidence?.slice(0, 200),
         evidence_message_id: it.evidence_message_id ?? null,
       });
@@ -580,6 +595,19 @@ function guessType(it: Item): string {
   if (/\b(bosqich|etap|faza|milestone|phase|f[0-5]\b)/.test(t)) return "milestone";
   if (/\b(xato|bug|muammo|blocker|to'siq)/.test(t)) return "blocker";
   return "task";
+}
+
+/**
+ * Oxirgi muvaffaqiyatli syncdan beri necha daqiqa o'tgan.
+ * null — hali hech qachon sync bo'lmagan.
+ */
+async function minutesSinceSync(db: Db, sessionId: string): Promise<number | null> {
+  const rows = await db.select<{ last_synced_at: string | null }>(
+    `chat_sessions?id=eq.${sessionId}&select=last_synced_at`,
+  );
+  const ts = rows[0]?.last_synced_at;
+  if (!ts) return null;
+  return Math.max(0, Math.round((Date.now() - new Date(ts).getTime()) / 60000));
 }
 
 function rpc<T>(

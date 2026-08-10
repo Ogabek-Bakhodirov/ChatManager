@@ -151,19 +151,40 @@ const DEMO = [
   { id: "2", parent_id: "1", title: "Create the 9 core tables", status: "done", position: 0 },
   { id: "3", parent_id: "1", title: "Write the RLS policies", status: "done", position: 1 },
   { id: "4", parent_id: "1", title: "Ship the apply_ops function", status: "done", position: 2,
+    note: "Two chats syncing at the same time were interleaving their writes and producing duplicate nodes. apply_ops now applies a whole batch inside one transaction behind an advisory lock on the project. Ordering matters: parents are written before children, otherwise temp ids resolve to nothing.",
     evidence_quote: "apply_ops applies operations atomically, behind an advisory lock, so two chats can never interleave." },
   { id: "5", parent_id: "1", title: "Test the migration on Postgres", status: "done", position: 3 },
   { id: "6", parent_id: null, title: "F1 Hook adapter", status: "in_progress", position: 1, type: "milestone" },
   { id: "7", parent_id: "6", title: "Publish the npm package", status: "done", position: 0 },
   { id: "8", parent_id: "6", title: "Transcript parser", status: "done", position: 1 },
   { id: "9", parent_id: "6", title: "Background sync worker", status: "in_progress", position: 2,
+    note: "Syncing on every message was too expensive, so the worker batches changes and flushes every 30 seconds into a single apply_ops call. Left in progress because the flush still fires while a message is mid-stream.",
     evidence_quote: "Worker runs every 30s and batches into one apply_ops call." },
-  { id: "10", parent_id: "6", title: "Fix the cursor crash on resume", status: "blocked", position: 3 },
+  { id: "10", parent_id: "6", title: "Fix the cursor crash on resume", status: "blocked", position: 3,
+    note: "The parser throws when a session resumes mid-stream, because the SDK emits no resume event to re-anchor the cursor. Decided to wait for the SDK release rather than patch around it — the workaround would have to be torn out again.",
+    evidence_quote: "It throws when the session resumes mid-stream — blocked until the SDK ships the resume event." },
   { id: "11", parent_id: null, title: "F2 Canvas", status: "todo", position: 2, type: "milestone" },
   { id: "12", parent_id: "11", title: "Draw the task tree", status: "in_progress", position: 0 },
   { id: "13", parent_id: "11", title: "Realtime subscription", status: "todo", position: 1 },
   { id: "14", parent_id: "11", title: "Inline node editing", status: "todo", position: 2, is_ghost: true },
 ];
+
+const DEMO_CONTEXT = {
+  "10": [
+    { out_id: "m1", out_role: "user", out_seq: 41, out_is_anchor: false,
+      out_content: "Parser resume paytida yiqilyapti. Nega?" },
+    { out_id: "m2", out_role: "assistant", out_seq: 42, out_is_anchor: true,
+      out_content: "It throws when the session resumes mid-stream — the SDK emits no resume event, so the cursor has nothing to re-anchor to. We can either fake the anchor from the last seq we saw, or wait." },
+    { out_id: "m3", out_role: "user", out_seq: 43, out_is_anchor: false,
+      out_content: "Fake qilsak keyin olib tashlash kerak bo'ladi. Kutamiz." },
+  ],
+  "4": [
+    { out_id: "m8", out_role: "user", out_seq: 12, out_is_anchor: false,
+      out_content: "Ikki chat bir vaqtda sync qilsa dublikat chiqyapti." },
+    { out_id: "m9", out_role: "assistant", out_seq: 13, out_is_anchor: true,
+      out_content: "apply_ops applies operations atomically, behind an advisory lock, so two chats can never interleave." },
+  ],
+};
 
 const DEMO_EVENTS = [
   { id: 3, op: "set_status", created_at: new Date().toISOString(), payload: { title: "Transcript parser", status: "done" } },
@@ -482,10 +503,96 @@ function Projects({ projects, activeId, onPick, onNew, onCopy, onRecovery, copie
     </div>`;
 }
 
-function Side({ selected, events, chats, open, onToggle, loading }) {
+/* Yig'iladigan bo'lim. Sarlavhaning o'zi tugma — o'ngdagi panel tor,
+   qo'shimcha tugma qo'yish uchun joy yo'q. */
+function Section({ title, count, open, onToggle, children }) {
+  return html`
+    <h3 class="tog" onClick=${onToggle}>
+      <span class=${"chev" + (open ? " on" : "")}><${Icon} n="right" /></span>
+      ${title}
+      <span class="spacer"></span>
+      ${count != null ? html`<span class="n">${count}</span>` : null}
+    </h3>
+    ${open ? children : null}`;
+}
+
+const ROLE_EN = { user: "You", assistant: "Assistant", tool: "Tool" };
+
+/* Tugun chiqqan joydagi suhbat parchasi.
+   Uch xil holat bor va ular chalkashmasligi kerak:
+     · store_raw o'chiq  -> matn umuman saqlanmagan, yoqishni taklif qilamiz
+     · manba noma'lum    -> evidence_message_id yo'q (eski tugun)
+     · matn bor          -> ko'rsatamiz, manba xabar ajratilgan holda */
+function NodeContext({ sb, demo, node, storeRaw, onEnableRaw }) {
+  const [state, setState] = useState("idle");   // idle|loading|ok|none|error
+  const [rows, setRows] = useState([]);
+  const [err, setErr] = useState(null);
+
+  useEffect(() => { setState("idle"); setRows([]); setErr(null); }, [node?.id]);
+
+  const load = async () => {
+    if (demo) {
+      setRows(DEMO_CONTEXT[node.id] ?? []);
+      setState((DEMO_CONTEXT[node.id] ?? []).length ? "ok" : "none");
+      return;
+    }
+    setState("loading");
+    const { data, error } = await sb.rpc("node_context", { p_node: node.id, p_span: 3 });
+    if (error) { setErr(error.message); setState("error"); return; }
+    setRows(data ?? []);
+    setState((data ?? []).length ? "ok" : "none");
+  };
+
+  // Matn saqlanmayotgan bo'lsa, tugmani bosishning ma'nosi yo'q — darhol aytamiz.
+  if (!storeRaw && !demo) {
+    return html`
+      <div class="rawoff">
+        <b>Conversation text is not stored for this project.</b> Only the short quote above
+        is kept. Turn storage on to see the surrounding messages here.
+        <button onClick=${onEnableRaw}>Store conversation text</button>
+        <div style=${{ marginTop: "8px", color: "var(--faint)" }}>
+          Applies to messages synced from now on — it cannot recover past conversations.
+        </div>
+      </div>`;
+  }
+
+  if (state === "idle") {
+    return html`<button class="ctxbtn" onClick=${load}>
+                  <${Icon} n="chat" />Show the conversation around this</button>`;
+  }
+  if (state === "loading") {
+    return html`<div class="skel" style=${{ padding: "10px 0 0" }}>
+                  <i style=${{ width: "88%" }}></i><i style=${{ width: "72%" }}></i>
+                  <i style=${{ width: "80%" }}></i></div>`;
+  }
+  if (state === "error") {
+    return html`<div class="rawoff">Could not load the conversation: ${err}</div>`;
+  }
+  if (state === "none") {
+    return html`<div class="rawoff">
+                  No source message is recorded for this node. Nodes created before
+                  conversation storage was enabled cannot be traced back.
+                </div>`;
+  }
+
+  return html`
+    <div class="ctx">
+      ${rows.map((m) => html`
+        <div key=${m.out_id ?? m.out_seq}
+             class=${"msg" + (m.out_is_anchor ? " anchor" : "") + (m.out_content ? "" : " empty-body")}>
+          <span class="who">${ROLE_EN[m.out_role] ?? m.out_role}</span>
+          ${m.out_content ?? "(text was not stored for this message)"}
+        </div>`)}
+    </div>`;
+}
+
+function Side({ selected, events, chats, open, onToggle, loading,
+                sb, demo, storeRaw, onEnableRaw }) {
   const chat = selected?.origin_session_id
     ? chats.find((c) => c.id === selected.origin_session_id)
     : null;
+  const [openSel, setOpenSel] = useState(true);
+  const [openAct, setOpenAct] = useState(true);
 
   return html`
     <div class="side">
@@ -510,67 +617,85 @@ function Side({ selected, events, chats, open, onToggle, loading }) {
         <div class="lbl">Details</div>
       </div>
 
-      <h3>Selected node</h3>
-      ${loading
-        ? html`<div class="skel"><i style=${{ width: "75%" }}></i><i style=${{ width: "90%" }}></i>
-                 <i style=${{ width: "60%" }}></i></div>`
-        : selected
-          ? html`
-            <div class="ev">
-              <div class="ti">${selected.title}</div>
-              <div class="n-meta" style=${{ marginTop: "9px" }}>
-                <span class=${"chip s-" + selected.status}>${STATUS_EN[selected.status] ?? selected.status}</span>
-                ${selected.type === "milestone" ? html`<span class="chip">Milestone</span>` : null}
-                ${selected.is_ghost ? html`<span class="chip">Guess</span>` : null}
-              </div>
-              ${selected.evidence_quote
-                ? html`
-                  <p class="q">${selected.evidence_quote}</p>
-                  <div class="qsrc">
-                    <span class="cdot" style=${{ background: chat?.color ?? "var(--edge)" }}></span>
-                    ${chat?.label ?? "Connected chat"} · the message this node came from
-                  </div>`
-                : html`<div class="empty" style=${{ padding: "22px 0 6px" }}>
-                         <span class="ico"><${Icon} n="quote" /></span>
-                         <span class="p">No quote was stored for this node.</span>
-                       </div>`}
-            </div>`
-          : html`<div class="empty">
-                   <span class="ico"><${Icon} n="quote" /></span>
-                   <span class="h">Nothing selected</span>
-                   <span class="p">Click a node to see which part of the chat it came from.</span>
-                 </div>`}
+      <${Section} title="Selected node" open=${openSel} onToggle=${() => setOpenSel(!openSel)}>
+        ${loading
+          ? html`<div class="skel"><i style=${{ width: "75%" }}></i><i style=${{ width: "90%" }}></i>
+                   <i style=${{ width: "60%" }}></i></div>`
+          : selected
+            ? html`
+              <div class="ev">
+                <div class="ti">${selected.title}</div>
+                <div class="n-meta" style=${{ marginTop: "9px" }}>
+                  <span class=${"chip s-" + selected.status}>${STATUS_EN[selected.status] ?? selected.status}</span>
+                  ${selected.type === "milestone" ? html`<span class="chip">Milestone</span>` : null}
+                  ${selected.is_ghost ? html`<span class="chip">Guess</span>` : null}
+                </div>
+
+                ${selected.note
+                  ? html`<span class="lbl-sm">What happened</span>
+                         <div class="concl">${selected.note}</div>`
+                  : null}
+
+                ${selected.evidence_quote
+                  ? html`
+                    <span class="lbl-sm">Quoted from the chat</span>
+                    <p class="q">${selected.evidence_quote}</p>
+                    <div class="qsrc">
+                      <span class="cdot" style=${{ background: chat?.color ?? "var(--edge)" }}></span>
+                      ${chat?.label ?? "Connected chat"}
+                    </div>`
+                  : null}
+
+                ${!selected.note && !selected.evidence_quote
+                  ? html`<div class="empty" style=${{ padding: "22px 0 6px" }}>
+                           <span class="ico"><${Icon} n="quote" /></span>
+                           <span class="p">This node was captured before summaries were
+                             stored, so there is nothing to show yet.</span>
+                         </div>`
+                  : null}
+
+                <${NodeContext} sb=${sb} demo=${demo} node=${selected}
+                                storeRaw=${storeRaw} onEnableRaw=${onEnableRaw} />
+              </div>`
+            : html`<div class="empty">
+                     <span class="ico"><${Icon} n="quote" /></span>
+                     <span class="h">Nothing selected</span>
+                     <span class="p">Click a node to see what was decided and where it came from.</span>
+                   </div>`}
+      <//>
 
       <div class="sep"></div>
 
-      <h3>Activity<span class="spacer"></span><span class="n">${events.length}</span></h3>
-      ${loading
-        ? html`<div class="skel"><i style=${{ width: "85%" }}></i><i style=${{ width: "70%" }}></i>
-                 <i style=${{ width: "78%" }}></i><i style=${{ width: "64%" }}></i></div>`
-        : events.length === 0
-          ? html`<div class="empty">
-                   <span class="ico"><${Icon} n="pulse" /></span>
-                   <span class="h">No events yet</span>
-                   <span class="p">Node changes from your connected chats show up here.</span>
-                 </div>`
-          : html`
-            <div class="feed">
-              ${events.map((e) => {
-                const st = e.payload?.status;
-                return html`
-                  <div key=${e.id}>
-                    <span class="mk" style=${{
-                      background: st ? `var(--${STATUS_VAR[st] ?? "todo"})` : "var(--edge)",
-                    }}></span>
-                    <div>
-                      <b>${e.payload?.title ?? "—"}</b>
-                      <span class="op"> · ${OP_EN[e.op] ?? e.op}${
-                        st ? ` → ${(STATUS_EN[st] ?? st).toLowerCase()}` : ""}</span>
-                      <div class="t">${timeAgo(e.created_at)}</div>
-                    </div>
-                  </div>`;
-              })}
-            </div>`}
+      <${Section} title="Activity" count=${events.length} open=${openAct}
+                  onToggle=${() => setOpenAct(!openAct)}>
+        ${loading
+          ? html`<div class="skel"><i style=${{ width: "85%" }}></i><i style=${{ width: "70%" }}></i>
+                   <i style=${{ width: "78%" }}></i><i style=${{ width: "64%" }}></i></div>`
+          : events.length === 0
+            ? html`<div class="empty">
+                     <span class="ico"><${Icon} n="pulse" /></span>
+                     <span class="h">No events yet</span>
+                     <span class="p">Node changes from your connected chats show up here.</span>
+                   </div>`
+            : html`
+              <div class="feed">
+                ${events.map((e) => {
+                  const st = e.payload?.status;
+                  return html`
+                    <div key=${e.id}>
+                      <span class="mk" style=${{
+                        background: st ? `var(--${STATUS_VAR[st] ?? "todo"})` : "var(--edge)",
+                      }}></span>
+                      <div>
+                        <b>${e.payload?.title ?? "—"}</b>
+                        <span class="op"> · ${OP_EN[e.op] ?? e.op}${
+                          st ? ` → ${(STATUS_EN[st] ?? st).toLowerCase()}` : ""}</span>
+                        <div class="t">${timeAgo(e.created_at)}</div>
+                      </div>
+                    </div>`;
+                })}
+              </div>`}
+      <//>
     </div>`;
 }
 
@@ -671,7 +796,7 @@ function App() {
 
   const loadProjects = useCallback(async (client) => {
     const { data } = await client.from("projects")
-      .select("id,name,archived_at").is("archived_at", null)
+      .select("id,name,archived_at,settings").is("archived_at", null)
       .order("created_at");
     const list = data ?? [];
     // tugunlar sonini bitta so'rov bilan
@@ -687,7 +812,7 @@ function App() {
   const loadTree = useCallback(async (client, pid) => {
     if (!pid) { setNodes([]); setEvents([]); setChats([]); return; }
     const { data: ns } = await client.from("nodes")
-      .select("id,parent_id,title,status,type,position,is_ghost,evidence_quote,origin_session_id")
+      .select("id,parent_id,title,status,type,position,is_ghost,note,evidence_quote,origin_session_id")
       .eq("project_id", pid);
     setNodes(ns ?? []);
     const { data: ev } = await client.from("node_events")
@@ -743,6 +868,18 @@ function App() {
       p.id,
       "Connect phrase copied — paste it as the first message of a new chat",
     ), [copyText]);
+
+  // store_raw loyiha sozlamasida yashaydi. DIQQAT: yoqilgani faqat KEYINGI
+  // xabarlarga ta'sir qiladi — o'tgan suhbatlar tiklanmaydi, matn saqlanmagan.
+  const enableStoreRaw = useCallback(async () => {
+    const p = projects.find((x) => x.id === activeId);
+    if (!p || !sb) return;
+    const next = { ...(p.settings ?? {}), store_raw: true };
+    const { error } = await sb.from("projects").update({ settings: next }).eq("id", p.id);
+    if (error) { say("Error: " + error.message); return; }
+    setProjects((cur) => cur.map((x) => (x.id === p.id ? { ...x, settings: next } : x)));
+    say("Conversation text will be stored from the next sync on");
+  }, [sb, projects, activeId]);
 
   const copyRecovery = useCallback(() =>
     copyText(
@@ -836,7 +973,9 @@ function App() {
         <${Canvas} key=${activeId} nodes=${nodes} selected=${selected} onSelect=${setSelected}
                    freshIds=${freshIds.current} />
         <${Side} selected=${selected} events=${events} chats=${chats} loading=${loading}
-                 open=${rightOpen} onToggle=${setRightOpen} />
+                 open=${rightOpen} onToggle=${setRightOpen}
+                 sb=${sb} demo=${demo} onEnableRaw=${enableStoreRaw}
+                 storeRaw=${!!projects.find((p) => p.id === activeId)?.settings?.store_raw} />
       </div>
 
       <div class=${"toast" + (toast ? " show" : "")}>
