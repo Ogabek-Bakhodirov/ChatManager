@@ -9,15 +9,17 @@ const html = htm.bind(React.createElement);
 
 const SUPABASE_URL = "https://jaxrpdxsnxacseckgfzm.supabase.co";
 const LS = "cm_canvas_cfg";
+const THEME_KEY = "cm_theme";
 
 /* ====================================================================== */
 /*  Joylashuv — daraxt uchun qo'lda yozilgan layout.                       */
 /*  Chapdan o'ngga: x = chuqurlik, y = barglar tartibi. Ota-ona            */
 /*  farzandlarining o'rtasiga tushadi.                                     */
 /* ====================================================================== */
+
 // Foydalanuvchi "nimadir tushib qolgan" deb o'ylaganda chatga qo'yadigan matn.
-// Avtomatik qatlamlar (prompt qoidalari, ID to'ri, qamrov to'ri, tanaffus
-// ogohlantirishi) o'tkazib yuborgan holat uchun qo'lda tuzatish yo'li.
+// DIQQAT: interfeys ingliz tilida, lekin BU MATN o'zbekcha qoladi — u UI emas,
+// modelga yuboriladigan yuk. Tarjima qilinsa extraction sifati o'zgaradi.
 const RECOVERY_PROMPT = `Chat Manager: to'liq tekshiruv
 
 1. chat_manager_tree ni chaqir — daraxtda hozir nima borligini ko'r.
@@ -28,13 +30,14 @@ const RECOVERY_PROMPT = `Chat Manager: to'liq tekshiruv
 
 Menga faqat qisqa hisobot ber: nechta yangi qo'shildi, nechta status o'zgardi.`;
 
-const NW = 250, GAP_X = 90, GAP_Y = 18;
+const NW = 250, GAP_X = 90, GAP_Y = 20;
 
 /* Tugun balandligi sarlavha uzunligiga bog'liq. O'lchash uchun DOM kerak,
    lekin joylashuv chizishdan OLDIN hisoblanadi — shuning uchun baho qilamiz.
    250px kenglikda ~30 belgi bir qatorga sig'adi. Kam baholansa tugunlar
-   bir-biriga tegib qoladi (birinchi versiyada aynan shunday bo'ldi). */
-const CHARS_PER_LINE = 30, LINE_H = 19, CHROME = 45;
+   bir-biriga tegib qoladi (birinchi versiyada aynan shunday bo'ldi).
+   CHROME 45 -> 48: yangi dizaynda padding va n-meta balandligi oshdi. */
+const CHARS_PER_LINE = 30, LINE_H = 19, CHROME = 48;
 function nodeH(n) {
   const lines = Math.max(1, Math.ceil(String(n.title ?? "").length / CHARS_PER_LINE));
   return CHROME + Math.min(lines, 4) * LINE_H;
@@ -102,42 +105,95 @@ function maxDepth(nodes, byId) {
 }
 
 /* ====================================================================== */
+/*  Ikonkalar — tashqi paket yo'q, hammasi shu yerda 16x16 stroke SVG      */
+/* ====================================================================== */
+const ICO = {
+  plus: '<path d="M8 3.2v9.6M3.2 8h9.6"/>',
+  minus: '<path d="M3.2 8h9.6"/>',
+  fit: '<path d="M6 2.6H2.6V6M10 2.6h3.4V6M10 13.4h3.4V10M6 13.4H2.6V10"/>',
+  copy: '<rect x="5.6" y="5.6" width="7.4" height="7.4" rx="1.8"/><path d="M10.4 3.6V3A1.6 1.6 0 0 0 8.8 1.4H4A1.6 1.6 0 0 0 2.4 3v4.8c0 .88.72 1.6 1.6 1.6h.6"/>',
+  check: '<path d="M2.8 8.4 6.1 11.6 13.2 4.4"/>',
+  left: '<path d="M9.8 3.4 5.2 8l4.6 4.6"/>',
+  right: '<path d="M6.2 3.4 10.8 8l-4.6 4.6"/>',
+  moon: '<path d="M13 9.6A5.6 5.6 0 0 1 6.4 3 5.6 5.6 0 1 0 13 9.6Z"/>',
+  sun: '<circle cx="8" cy="8" r="3.1"/><path d="M8 1.4v1.6M8 13v1.6M1.4 8h1.6M13 8h1.6M3.4 3.4l1.1 1.1M11.5 11.5l1.1 1.1M12.6 3.4l-1.1 1.1M4.5 11.5l-1.1 1.1"/>',
+  refresh: '<path d="M13.4 6.6A5.6 5.6 0 0 0 3.3 4.9M2.6 9.4a5.6 5.6 0 0 0 10.1 1.7"/><path d="M13.4 3.2v3.4H10M2.6 12.8V9.4H6"/>',
+  folder: '<path d="M1.9 4.4c0-.9.7-1.6 1.6-1.6h2.2l1.5 1.7h5.3c.9 0 1.6.7 1.6 1.6v5.5c0 .9-.7 1.6-1.6 1.6H3.5c-.9 0-1.6-.7-1.6-1.6Z"/>',
+  chat: '<path d="M13.6 8.9c0 2.3-2.5 4.2-5.6 4.2-.7 0-1.4-.1-2-.3l-3 1.1.9-2.4A4.4 4.4 0 0 1 2.4 8.9c0-2.3 2.5-4.2 5.6-4.2s5.6 1.9 5.6 4.2Z"/>',
+  quote: '<path d="M4.6 11.4c-1.4 0-2.2-1-2.2-2.4 0-2.4 1.6-4.6 3.8-5.8l.7 1.2C5.5 5.2 4.6 6.2 4.4 7.3c1.4 0 2.4.8 2.4 2.1 0 1.2-.9 2-2.2 2ZM11.4 11.4c-1.4 0-2.2-1-2.2-2.4 0-2.4 1.6-4.6 3.8-5.8l.7 1.2c-1.4 1-2.3 2-2.5 3.1 1.4 0 2.4.8 2.4 2.1 0 1.2-.9 2-2.2 2Z"/>',
+  pulse: '<path d="M1.6 8h2.8l1.7-4.4L8.4 12l1.8-4h3.2"/>',
+  spark: '<path d="M8 1.8v3.4M8 10.8v3.4M1.8 8h3.4M10.8 8h3.4"/><circle cx="8" cy="8" r="2.2"/>',
+  key: '<circle cx="5.4" cy="10.6" r="2.8"/><path d="M7.4 8.6l5.2-5.2M10.2 5.8l1.6 1.6"/>',
+};
+
+function Icon({ n }) {
+  return html`<svg class="i" viewBox="0 0 16 16"
+                dangerouslySetInnerHTML=${{ __html: ICO[n] ?? "" }} />`;
+}
+
+/* ====================================================================== */
+/*  Mavzu                                                                  */
+/* ====================================================================== */
+function readTheme() {
+  const el = document.documentElement.getAttribute("data-theme");
+  return el === "light" ? "light" : "dark";
+}
+function writeTheme(t) {
+  document.documentElement.setAttribute("data-theme", t);
+  try { localStorage.setItem(THEME_KEY, t); } catch { /* private mode */ }
+}
+
+/* ====================================================================== */
 /*  Demo ma'lumot — sozlamasiz ochilganda nima ko'rinishini ko'rsatadi     */
 /* ====================================================================== */
 const DEMO = [
-  { id: "1", parent_id: null, title: "F0 baza", status: "done", position: 0, type: "milestone" },
-  { id: "2", parent_id: "1", title: "9 ta jadvalni yaratish", status: "done", position: 0 },
-  { id: "3", parent_id: "1", title: "RLS policylarini yozish", status: "done", position: 1 },
-  { id: "4", parent_id: "1", title: "apply_ops funksiyasini yozish", status: "done", position: 2,
-    evidence_quote: "apply_ops operatsiyalarni atomik qo'llaydi, advisory lock bilan" },
-  { id: "5", parent_id: "1", title: "Migratsiyani Postgres da sinash", status: "done", position: 3 },
-  { id: "6", parent_id: null, title: "F1 hook adapter", status: "in_progress", position: 1, type: "milestone" },
-  { id: "7", parent_id: "6", title: "npm paketini yaratish", status: "done", position: 0 },
-  { id: "8", parent_id: "6", title: "Transkript parseri yozish", status: "done", position: 1 },
-  { id: "9", parent_id: "6", title: "Fon jarayoni yozish", status: "in_progress", position: 2 },
-  { id: "10", parent_id: "6", title: "Kursor xatosini tuzatish", status: "blocked", position: 3 },
-  { id: "11", parent_id: null, title: "F2 canvas", status: "todo", position: 2, type: "milestone" },
-  { id: "12", parent_id: "11", title: "Daraxt chizish", status: "in_progress", position: 0 },
-  { id: "13", parent_id: "11", title: "Realtime ulash", status: "todo", position: 1 },
-  { id: "14", parent_id: "11", title: "Tugunni tahrirlash", status: "todo", position: 2, is_ghost: true },
+  { id: "1", parent_id: null, title: "F0 Foundation", status: "done", position: 0, type: "milestone" },
+  { id: "2", parent_id: "1", title: "Create the 9 core tables", status: "done", position: 0 },
+  { id: "3", parent_id: "1", title: "Write the RLS policies", status: "done", position: 1 },
+  { id: "4", parent_id: "1", title: "Ship the apply_ops function", status: "done", position: 2,
+    evidence_quote: "apply_ops applies operations atomically, behind an advisory lock, so two chats can never interleave." },
+  { id: "5", parent_id: "1", title: "Test the migration on Postgres", status: "done", position: 3 },
+  { id: "6", parent_id: null, title: "F1 Hook adapter", status: "in_progress", position: 1, type: "milestone" },
+  { id: "7", parent_id: "6", title: "Publish the npm package", status: "done", position: 0 },
+  { id: "8", parent_id: "6", title: "Transcript parser", status: "done", position: 1 },
+  { id: "9", parent_id: "6", title: "Background sync worker", status: "in_progress", position: 2,
+    evidence_quote: "Worker runs every 30s and batches into one apply_ops call." },
+  { id: "10", parent_id: "6", title: "Fix the cursor crash on resume", status: "blocked", position: 3 },
+  { id: "11", parent_id: null, title: "F2 Canvas", status: "todo", position: 2, type: "milestone" },
+  { id: "12", parent_id: "11", title: "Draw the task tree", status: "in_progress", position: 0 },
+  { id: "13", parent_id: "11", title: "Realtime subscription", status: "todo", position: 1 },
+  { id: "14", parent_id: "11", title: "Inline node editing", status: "todo", position: 2, is_ghost: true },
 ];
 
 const DEMO_EVENTS = [
-  { id: 3, op: "set_status", created_at: new Date().toISOString(), payload: { title: "Transkript parseri yozish", status: "done" } },
-  { id: 2, op: "add_node", created_at: new Date(Date.now() - 4e5).toISOString(), payload: { title: "Kursor xatosini tuzatish" } },
-  { id: 1, op: "add_node", created_at: new Date(Date.now() - 9e5).toISOString(), payload: { title: "Fon jarayoni yozish" } },
+  { id: 3, op: "set_status", created_at: new Date().toISOString(), payload: { title: "Transcript parser", status: "done" } },
+  { id: 2, op: "add_node", created_at: new Date(Date.now() - 4e5).toISOString(), payload: { title: "Fix the cursor crash on resume" } },
+  { id: 1, op: "add_node", created_at: new Date(Date.now() - 9e5).toISOString(), payload: { title: "Background sync worker" } },
 ];
 
 /* ====================================================================== */
 
-const STATUS_UZ = {
-  todo: "kutmoqda", in_progress: "jarayonda", done: "bajarildi",
-  blocked: "to'sildi", cancelled: "bekor",
+const STATUS_EN = {
+  todo: "To do", in_progress: "In progress", done: "Done",
+  blocked: "Blocked", cancelled: "Cancelled",
 };
-const OP_UZ = {
-  add_node: "qo'shildi", set_status: "status", rename: "nomi o'zgardi",
-  move: "ko'chirildi", delete: "o'chirildi", ghost_expired: "taxmin o'chdi", merge: "birlashtirildi",
+const OP_EN = {
+  add_node: "added", set_status: "status", rename: "renamed",
+  move: "moved", delete: "deleted", ghost_expired: "guess expired", merge: "merged",
 };
+const STATUS_VAR = {
+  todo: "todo", in_progress: "prog", done: "done", blocked: "block", cancelled: "cancel",
+};
+
+function timeAgo(iso) {
+  const t = new Date(iso).getTime();
+  if (!Number.isFinite(t)) return "";
+  const s = Math.max(0, Math.round((Date.now() - t) / 1000));
+  if (s < 60) return s + "s ago";
+  if (s < 3600) return Math.round(s / 60) + "m ago";
+  if (s < 86400) return Math.round(s / 3600) + "h ago";
+  return Math.round(s / 86400) + "d ago";
+}
 
 function Node({ n, x, y, selected, fresh, onClick }) {
   const cls = [
@@ -147,9 +203,9 @@ function Node({ n, x, y, selected, fresh, onClick }) {
     <div class=${cls} style=${{ left: x + "px", top: y + "px" }} onClick=${() => onClick(n)}>
       <div class="n-title">${n.title}</div>
       <div class="n-meta">
-        <span class=${"chip s-" + n.status}>${STATUS_UZ[n.status] ?? n.status}</span>
-        ${n.type === "milestone" ? html`<span class="chip">bosqich</span>` : null}
-        ${n.is_ghost ? html`<span class="chip">taxmin</span>` : null}
+        <span class=${"chip s-" + n.status}>${STATUS_EN[n.status] ?? n.status}</span>
+        ${n.type === "milestone" ? html`<span class="chip">Milestone</span>` : null}
+        ${n.is_ghost ? html`<span class="chip">Guess</span>` : null}
       </div>
     </div>`;
 }
@@ -157,23 +213,48 @@ function Node({ n, x, y, selected, fresh, onClick }) {
 function Canvas({ nodes, selected, onSelect, freshIds }) {
   const stage = useRef(null);
   const [view, setView] = useState({ x: 60, y: 40, k: 1 });
+  // Gesture eslatmasi faqat birinchi tashrifda. Har safar chiqsa u yuqoridagi
+  // tugunni to'sib turadi va foydasi yo'q — bir marta ko'rgan kifoya.
+  const [hint, setHint] = useState(() => {
+    try { return localStorage.getItem("cm_hint_seen") !== "1"; } catch { return true; }
+  });
   const drag = useRef(null);
 
-  const { pos, edges, height } = useMemo(() => layout(nodes), [nodes]);
+  const { pos, edges, width, height } = useMemo(() => layout(nodes), [nodes]);
+  const geo = useRef({ width, height });
+  geo.current = { width, height };
+
+  const clampK = (k) => Math.min(2.2, Math.max(0.2, k));
+
+  const fit = useCallback(() => {
+    const el = stage.current?.getBoundingClientRect();
+    if (!el) return;
+    const { width: w, height: h } = geo.current;
+    const k = clampK(Math.min(1,
+      (el.width - 96) / Math.max(w - GAP_X, 1),
+      (el.height - 96) / Math.max(h, 1)));
+    setView({ x: 48, y: 36, k });
+  }, []);
 
   // Birinchi yuklashda daraxtni ekranga sig'dirish
   const fitted = useRef(false);
   useEffect(() => {
     if (fitted.current || nodes.length === 0 || !stage.current) return;
     fitted.current = true;
-    const el = stage.current.getBoundingClientRect();
-    const w = (maxDepth(nodes, new Map(nodes.map((n) => [n.id, n]))) + 1) * (NW + GAP_X);
-    const k = Math.min(1, (el.width - 80) / Math.max(w, 1), (el.height - 80) / Math.max(height, 1));
-    setView({ x: 40, y: 30, k: Math.max(0.35, k) });
-  }, [nodes, height]);
+    fit();
+  }, [nodes, fit]);
+
+  useEffect(() => {
+    if (!hint) return;
+    const t = setTimeout(() => {
+      setHint(false);
+      try { localStorage.setItem("cm_hint_seen", "1"); } catch { /* private mode */ }
+    }, 5000);
+    return () => clearTimeout(t);
+  }, [hint]);
 
   const onDown = (e) => {
-    if (e.target.closest(".node")) return;
+    if (e.target.closest(".node") || e.target.closest(".zoom") || e.target.closest(".legend")) return;
     drag.current = { sx: e.clientX, sy: e.clientY, vx: view.x, vy: view.y };
     stage.current.classList.add("drag");
   };
@@ -187,15 +268,32 @@ function Canvas({ nodes, selected, onSelect, freshIds }) {
   };
   const onUp = () => { drag.current = null; stage.current?.classList.remove("drag"); };
 
+  /* Ikki barmoq bilan surish = SURISH, chimdish = masshtab.
+     Brauzer trackpad chimdishini `wheel` + ctrlKey=true deb beradi — boshqa
+     ajratish yo'li yo'q. Oldin har qanday wheel zoom qilardi va shuning uchun
+     ikki barmoqli oddiy scroll daraxtni masshtablab yuborardi. */
   const onWheel = useCallback((e) => {
     e.preventDefault();
-    const r = stage.current.getBoundingClientRect();
-    const mx = e.clientX - r.left, my = e.clientY - r.top;
-    setView((v) => {
-      const k = Math.min(2.2, Math.max(0.2, v.k * (e.deltaY < 0 ? 1.12 : 0.89)));
-      const s = k / v.k;
-      return { k, x: mx - (mx - v.x) * s, y: my - (my - v.y) * s };
-    });
+    const el = stage.current;
+    if (!el) return;
+    // deltaMode: 0 = piksel, 1 = qator, 2 = sahifa
+    const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? el.clientHeight : 1;
+
+    if (e.ctrlKey || e.metaKey) {
+      const r = el.getBoundingClientRect();
+      const mx = e.clientX - r.left, my = e.clientY - r.top;
+      // Sichqoncha g'ildiragi bitta "tirillash"da ±120 beradi, trackpad chimdishi
+      // esa 1–10. Cheklamasa g'ildirakning bitta bosqichi masshtabni 2.5 barobar
+      // sakratadi. 50 ga kesamiz: eng katta qadam ~1.45x.
+      const d = Math.max(-50, Math.min(50, e.deltaY * unit));
+      setView((v) => {
+        const k = clampK(v.k * Math.exp(-d * 0.0075));
+        const s = k / v.k;
+        return { k, x: mx - (mx - v.x) * s, y: my - (my - v.y) * s };
+      });
+    } else {
+      setView((v) => ({ ...v, x: v.x - e.deltaX * unit, y: v.y - e.deltaY * unit }));
+    }
   }, []);
 
   useEffect(() => {
@@ -205,7 +303,16 @@ function Canvas({ nodes, selected, onSelect, freshIds }) {
     return () => el.removeEventListener("wheel", onWheel);
   }, [onWheel]);
 
-  const zoom = (f) => setView((v) => ({ ...v, k: Math.min(2.2, Math.max(0.2, v.k * f)) }));
+  // Tugmalar ekran markaziga qarab masshtablaydi
+  const zoom = (f) => {
+    const r = stage.current?.getBoundingClientRect();
+    const mx = (r?.width ?? 0) / 2, my = (r?.height ?? 0) / 2;
+    setView((v) => {
+      const k = clampK(v.k * f);
+      const s = k / v.k;
+      return { k, x: mx - (mx - v.x) * s, y: my - (my - v.y) * s };
+    });
+  };
 
   const paths = edges.map(([a, b]) => {
     const p = pos.get(a), c = pos.get(b);
@@ -213,7 +320,7 @@ function Canvas({ nodes, selected, onSelect, freshIds }) {
     const x1 = p.x + NW, y1 = p.y + (p.h ?? 62) / 2, x2 = c.x, y2 = c.y + (c.h ?? 62) / 2;
     const mid = x1 + (x2 - x1) / 2;
     return html`<path key=${a + b} d=${`M${x1},${y1} C${mid},${y1} ${mid},${y2} ${x2},${y2}`}
-                 fill="none" stroke="#2f3a49" stroke-width="1.6" />`;
+                 fill="none" stroke="var(--edge)" stroke-width="1.5" />`;
   });
 
   return html`
@@ -229,117 +336,245 @@ function Canvas({ nodes, selected, onSelect, freshIds }) {
                         onClick=${onSelect} />`;
         })}
       </div>
-      <div class="zoom">
-        <button onClick=${() => zoom(1.2)}>+</button>
-        <button onClick=${() => zoom(0.83)}>−</button>
-        <button onClick=${() => { fitted.current = false; setView({ x: 40, y: 30, k: 1 }); }}>⤢</button>
+
+      <div class=${"hintbar" + (hint && nodes.length ? " show" : "")}>
+        <span>Two-finger swipe to pan</span><kbd>⌘</kbd><span>+ scroll or pinch to zoom</span>
       </div>
+
+      ${nodes.length ? html`
+        <div class="legend">
+          <span><i style=${{ background: "var(--prog)" }}></i>In progress</span>
+          <span><i style=${{ background: "var(--done)" }}></i>Done</span>
+          <span><i style=${{ background: "var(--block)" }}></i>Blocked</span>
+          <span><i style=${{ background: "var(--todo)" }}></i>To do</span>
+        </div>` : null}
+
+      <div class="zoom">
+        <button class="icon" title="Zoom out" onClick=${() => zoom(0.83)}><${Icon} n="minus" /></button>
+        <div class="lvl">${Math.round(view.k * 100)}%</div>
+        <button class="icon" title="Zoom in" onClick=${() => zoom(1.2)}><${Icon} n="plus" /></button>
+        <button class="icon" title="Fit to screen" onClick=${fit}><${Icon} n="fit" /></button>
+      </div>
+
       ${nodes.length === 0
-        ? html`<div class="empty" style=${{ position: "absolute", inset: 0, display: "grid", placeItems: "center" }}>
-                 Hali tugun yo'q. Chatda gaplashing — daraxt shu yerda o'sadi.</div>`
+        ? html`<div class="empty" style=${{ position: "absolute", inset: 0, justifyContent: "center" }}>
+                 <span class="ico"><${Icon} n="spark" /></span>
+                 <span class="h">No nodes yet</span>
+                 <span class="p">Keep working in your connected chats — the tree grows here on its own.</span>
+               </div>`
         : null}
     </div>`;
 }
 
-function Projects({ projects, activeId, onPick, onNew, onCopy, onRecovery, copiedId, chats }) {
+function Projects({ projects, activeId, onPick, onNew, onCopy, onRecovery, copiedId,
+                    chats, open, onToggle, loading }) {
+  const linked = chats.filter((c) => c.status === "linked").length;
+  const pending = chats.length - linked;
+
   return html`
     <div class="left">
-      <h3>
-        Loyihalar
-        <button class="newbtn" onClick=${onNew}>+ New</button>
-      </h3>
-      <div class="plist">
-        ${projects.length === 0
-          ? html`<div class="hint" style=${{ padding: "0 6px" }}>
-                   Loyiha yo'q. <b>+ New</b> bilan yarating.</div>`
-          : projects.map((p) => html`
-              <div key=${p.id} class=${"prow" + (p.id === activeId ? " on" : "")}
-                   onClick=${() => onPick(p.id)}>
-                <div class="nm">
-                  <div>${p.name}</div>
-                  <div class="ct">${p.nodes ?? 0} tugun</div>
-                </div>
-                <button class=${"copy" + (copiedId === p.id ? " done" : "")}
-                        title="Ulash iborasini nusxalash"
-                        onClick=${(e) => { e.stopPropagation(); onCopy(p); }}>
-                  ${copiedId === p.id ? "✓" : "⧉"}
-                </button>
-              </div>`)}
+      <div class="rail">
+        <button class="rbtn" title="Expand projects" onClick=${() => onToggle(true)}>
+          <${Icon} n="right" />
+        </button>
+        <div class="rdiv"></div>
+        ${projects.map((p) => html`
+          <button key=${p.id} class=${"rbtn" + (p.id === activeId ? " on" : "")}
+                  title=${`${p.name} · ${p.nodes ?? 0} nodes`}
+                  onClick=${() => onPick(p.id)}>
+            ${String(p.name ?? "?").slice(0, 1).toUpperCase()}
+            <span class="badge">${p.nodes ?? 0}</span>
+          </button>`)}
+        <div class="rdiv"></div>
+        <button class="rbtn" title=${`${linked} connected chats`} onClick=${() => onToggle(true)}>
+          <${Icon} n="chat" /><span class="badge">${linked}</span>
+        </button>
+        <div class="rlabel">Projects</div>
       </div>
 
-      ${activeId ? html`
-        <h3>Ulangan chatlar</h3>
-        <div class="chats">
-          <div>
-            <span class="cdot" style=${{ background: "var(--done)" }}></span>
-            <span style=${{ flex: 1 }}>Faol</span>
-            <b style=${{ color: "var(--text)" }}>${chats.filter((c) => c.status === "linked").length}</b>
-          </div>
-          ${chats.some((c) => c.status !== "linked")
-            ? html`<div>
-                 <span class="cdot" style=${{ background: "var(--muted)" }}></span>
-                 <span style=${{ flex: 1 }}>Ulanmagan</span>
-                 <b style=${{ color: "var(--muted)" }}>${chats.filter((c) => c.status !== "linked").length}</b>
-               </div>`
-            : null}
-          <div style=${{ borderBottom: "none", paddingTop: "10px" }}>
-            <span class="hint" style=${{ lineHeight: 1.45 }}>
-              Yangi chat qo'shish: yuqoridagi ⧉ tugmasidan iborani nusxalab,
-              chatning birinchi xabariga qo'ying. Bitta ibora — cheksiz chat.
-            </span>
-          </div>
-        </div>
+      <div class="panel-head">
+        <div class="lbl">Workspace</div>
+        <button class="collapse" title="Collapse panel" onClick=${() => onToggle(false)}>
+          <${Icon} n="left" />
+        </button>
+      </div>
 
-        <h3>Tasklar tushib qolganmi?</h3>
-        <div class="chats">
-          <div style=${{ borderBottom: "none", paddingBottom: "8px" }}>
-            <span class="hint" style=${{ lineHeight: 1.45 }}>
-              Daraxtda yetishmayotgan ish bo'lsa, shu promptni nusxalab
-              o'sha chatga yuboring — u suhbatni boshidan qayta ko'rib chiqadi.
-            </span>
-          </div>
-          <div style=${{ borderBottom: "none" }}>
-            <button class=${"newbtn" + (copiedId === "__recovery__" ? " done" : "")}
-                    style=${{ width: "100%", padding: "7px" }}
-                    onClick=${onRecovery}>
-              ${copiedId === "__recovery__" ? "✓ Nusxalandi" : "⧉ Tiklash promptini nusxalash"}
-            </button>
-          </div>
+      <h3>
+        Projects<span class="spacer"></span>
+        <span class="n">${projects.length}</span>
+        <button class="newbtn" onClick=${onNew}><${Icon} n="plus" />New</button>
+      </h3>
+
+      ${loading
+        ? html`<div class="skel"><i style=${{ width: "80%" }}></i><i style=${{ width: "62%" }}></i>
+                 <i style=${{ width: "70%" }}></i></div>`
+        : projects.length === 0
+          ? html`<div class="empty" style=${{ padding: "18px 20px" }}>
+                   <span class="ico"><${Icon} n="folder" /></span>
+                   <span class="h">No projects</span>
+                   <span class="p">Create one with <b>New</b>, then paste its connect phrase into a chat.</span>
+                 </div>`
+          : html`
+            <div class="plist">
+              ${projects.map((p) => html`
+                <div key=${p.id} class=${"prow" + (p.id === activeId ? " on" : "")}
+                     onClick=${() => onPick(p.id)}>
+                  <div class="av">${String(p.name ?? "?").slice(0, 1).toUpperCase()}</div>
+                  <div class="nm">
+                    <div class="t">${p.name}</div>
+                    <div class="ct">
+                      ${p.nodes ?? 0} nodes
+                      ${p.id === activeId && chats.length
+                        ? html`<i></i>${linked} chat${linked === 1 ? "" : "s"}`
+                        : null}
+                    </div>
+                  </div>
+                  <button class=${"copy" + (copiedId === p.id ? " done" : "")}
+                          title="Copy connect phrase"
+                          onClick=${(e) => { e.stopPropagation(); onCopy(p); }}>
+                    <${Icon} n=${copiedId === p.id ? "check" : "copy"} />
+                  </button>
+                </div>`)}
+            </div>`}
+
+      ${activeId ? html`
+        <div class="sep"></div>
+
+        <h3>Connected chats<span class="spacer"></span>
+          <span class="n">${linked}/${chats.length}</span></h3>
+
+        ${loading
+          ? html`<div class="skel"><i style=${{ width: "70%" }}></i><i style=${{ width: "55%" }}></i></div>`
+          : html`
+            <div class="chats">
+              <div>
+                <span class="cdot" style=${{ background: "var(--done)" }}></span>
+                <span class="nm">Active</span>
+                <b>${linked}</b>
+              </div>
+              ${pending > 0 ? html`
+                <div>
+                  <span class="cdot" style=${{ boxShadow: "inset 0 0 0 1px var(--line-strong)" }}></span>
+                  <span class="nm">Not connected</span>
+                  <b>${pending}</b>
+                </div>` : null}
+            </div>
+            <div class="note">
+              ${pending > 0
+                ? `${pending} chat${pending === 1 ? "" : "s"} not connected yet. `
+                : "All chats connected. "}
+              Copy the project's connect phrase and paste it as the first message of a chat —
+              one phrase, unlimited chats.
+            </div>`}
+
+        <div class="sep"></div>
+
+        <h3>Tasks gone missing?</h3>
+        <div class="recovery">
+          <p>If work is missing from the tree, copy this prompt into that chat — it re-reads the
+             conversation from the start.</p>
+          <pre>${RECOVERY_PROMPT}</pre>
+          <button class=${copiedId === "__recovery__" ? "done" : ""} onClick=${onRecovery}>
+            <${Icon} n=${copiedId === "__recovery__" ? "check" : "copy"} />
+            ${copiedId === "__recovery__" ? "Copied" : "Copy recovery prompt"}
+          </button>
         </div>` : null}
     </div>`;
 }
 
-function Side({ selected, events }) {
+function Side({ selected, events, chats, open, onToggle, loading }) {
+  const chat = selected?.origin_session_id
+    ? chats.find((c) => c.id === selected.origin_session_id)
+    : null;
+
   return html`
     <div class="side">
-      <h3>Tanlangan</h3>
-      ${selected
-        ? html`<div class="ev">
-             <div style=${{ fontWeight: 600 }}>${selected.title}</div>
-             <div class="n-meta" style=${{ marginTop: "8px" }}>
-               <span class=${"chip s-" + selected.status}>${STATUS_UZ[selected.status]}</span>
-             </div>
-             ${selected.evidence_quote
-               ? html`<p class="q">${selected.evidence_quote}</p>`
-               : html`<p class="hint">Bu tugun uchun iqtibos saqlanmagan.</p>`}
-           </div>`
-        : html`<div class="ev"><span class="hint">Tugunni bosing — u chatning qaysi joyidan chiqqani ko'rinadi.</span></div>`}
-
-      <h3>Oqim</h3>
-      <div class="feed">
-        ${events.length === 0
-          ? html`<span class="hint">Hozircha hodisa yo'q.</span>`
-          : events.map((e) => html`
-              <div key=${e.id}>
-                <b>${e.payload?.title ?? "—"}</b> · ${OP_UZ[e.op] ?? e.op}
-                ${e.payload?.status ? html` → ${STATUS_UZ[e.payload.status] ?? e.payload.status}` : null}
-                <div class="t">${new Date(e.created_at).toLocaleTimeString("uz-UZ")}</div>
-              </div>`)}
+      <div class="rail">
+        <button class="rbtn" title="Expand details" onClick=${() => onToggle(true)}>
+          <${Icon} n="left" />
+        </button>
+        <div class="rdiv"></div>
+        <button class=${"rbtn" + (selected ? " on" : "")}
+                title=${selected ? selected.title : "No node selected"}
+                onClick=${() => onToggle(true)}><${Icon} n="quote" /></button>
+        <button class="rbtn" title=${`${events.length} recent events`} onClick=${() => onToggle(true)}>
+          <${Icon} n="pulse" /><span class="badge">${events.length}</span>
+        </button>
+        <div class="rlabel">Details</div>
       </div>
+
+      <div class="panel-head">
+        <button class="collapse" title="Collapse panel" onClick=${() => onToggle(false)}>
+          <${Icon} n="right" />
+        </button>
+        <div class="lbl">Details</div>
+      </div>
+
+      <h3>Selected node</h3>
+      ${loading
+        ? html`<div class="skel"><i style=${{ width: "75%" }}></i><i style=${{ width: "90%" }}></i>
+                 <i style=${{ width: "60%" }}></i></div>`
+        : selected
+          ? html`
+            <div class="ev">
+              <div class="ti">${selected.title}</div>
+              <div class="n-meta" style=${{ marginTop: "9px" }}>
+                <span class=${"chip s-" + selected.status}>${STATUS_EN[selected.status] ?? selected.status}</span>
+                ${selected.type === "milestone" ? html`<span class="chip">Milestone</span>` : null}
+                ${selected.is_ghost ? html`<span class="chip">Guess</span>` : null}
+              </div>
+              ${selected.evidence_quote
+                ? html`
+                  <p class="q">${selected.evidence_quote}</p>
+                  <div class="qsrc">
+                    <span class="cdot" style=${{ background: chat?.color ?? "var(--edge)" }}></span>
+                    ${chat?.label ?? "Connected chat"} · the message this node came from
+                  </div>`
+                : html`<div class="empty" style=${{ padding: "22px 0 6px" }}>
+                         <span class="ico"><${Icon} n="quote" /></span>
+                         <span class="p">No quote was stored for this node.</span>
+                       </div>`}
+            </div>`
+          : html`<div class="empty">
+                   <span class="ico"><${Icon} n="quote" /></span>
+                   <span class="h">Nothing selected</span>
+                   <span class="p">Click a node to see which part of the chat it came from.</span>
+                 </div>`}
+
+      <div class="sep"></div>
+
+      <h3>Activity<span class="spacer"></span><span class="n">${events.length}</span></h3>
+      ${loading
+        ? html`<div class="skel"><i style=${{ width: "85%" }}></i><i style=${{ width: "70%" }}></i>
+                 <i style=${{ width: "78%" }}></i><i style=${{ width: "64%" }}></i></div>`
+        : events.length === 0
+          ? html`<div class="empty">
+                   <span class="ico"><${Icon} n="pulse" /></span>
+                   <span class="h">No events yet</span>
+                   <span class="p">Node changes from your connected chats show up here.</span>
+                 </div>`
+          : html`
+            <div class="feed">
+              ${events.map((e) => {
+                const st = e.payload?.status;
+                return html`
+                  <div key=${e.id}>
+                    <span class="mk" style=${{
+                      background: st ? `var(--${STATUS_VAR[st] ?? "todo"})` : "var(--edge)",
+                    }}></span>
+                    <div>
+                      <b>${e.payload?.title ?? "—"}</b>
+                      <span class="op"> · ${OP_EN[e.op] ?? e.op}${
+                        st ? ` → ${(STATUS_EN[st] ?? st).toLowerCase()}` : ""}</span>
+                      <div class="t">${timeAgo(e.created_at)}</div>
+                    </div>
+                  </div>`;
+              })}
+            </div>`}
     </div>`;
 }
 
-function Gate({ onReady, initial }) {
+function Gate({ onReady, initial, theme, onTheme }) {
   const [key, setKey] = useState(initial?.key ?? "");
   const [email, setEmail] = useState(initial?.email ?? "");
   const [pw, setPw] = useState("");
@@ -362,23 +597,36 @@ function Gate({ onReady, initial }) {
   return html`
     <div class="gate">
       <div class="card">
-        <h1>Chat <span style=${{ color: "var(--accent)" }}>Manager</span></h1>
-        <p>Supabase hisobingiz bilan kiring.</p>
+        <div class="mark">
+          <${Icon} n="spark" />
+          <span style=${{ fontWeight: 650, letterSpacing: "-.01em", color: "var(--text)" }}>
+            Chat <span style=${{ color: "var(--accent)" }}>Manager</span>
+          </span>
+          <span class="spacer" style=${{ flex: 1 }}></span>
+          <button class="icon ghost" title="Toggle theme" onClick=${onTheme}>
+            <${Icon} n=${theme === "light" ? "moon" : "sun"} />
+          </button>
+        </div>
+        <h1>Sign in</h1>
+        <p>Connect your Supabase account to open your live task canvas.
+           Or take a look around with sample data first.</p>
         <label>Anon key (publishable)</label>
         <input value=${key} onInput=${(e) => setKey(e.target.value)} placeholder="eyJhbGciOi..." />
         <label>Email</label>
-        <input value=${email} onInput=${(e) => setEmail(e.target.value)} />
-        <label>Parol</label>
+        <input value=${email} onInput=${(e) => setEmail(e.target.value)} placeholder="you@company.com" />
+        <label>Password</label>
         <input type="password" value=${pw} onInput=${(e) => setPw(e.target.value)}
+               placeholder="••••••••"
                onKeyDown=${(e) => e.key === "Enter" && go()} />
-        <div style=${{ display: "flex", gap: "8px", marginTop: "18px" }}>
-          <button class="primary" onClick=${go} disabled=${busy}>${busy ? "..." : "Kirish"}</button>
-          <button onClick=${() => onReady(null)}>Demo ko'rish</button>
+        <div class="row">
+          <button class="primary" onClick=${go} disabled=${busy}>${busy ? "Signing in…" : "Sign in"}</button>
+          <button onClick=${() => onReady(null)}>View demo</button>
         </div>
-        ${err ? html`<div class="err">${err}</div>` : null}
+        ${err ? html`<div class="err"><${Icon} n="key" />${err}</div>` : null}
         <div class="hint">
-          Anon key: Supabase Dashboard → Project Settings → API → <b>anon / publishable</b>.
-          U ochiq kalit, maxfiy emas. Brauzeringizda saqlanadi, hech qayerga yuborilmaydi.
+          <${Icon} n="key" /> Find the anon key in Supabase Dashboard → Project Settings → API →
+          <b>anon / publishable</b>. It is a public key, not a secret. It stays in your browser and
+          is never sent anywhere else.
         </div>
       </div>
     </div>`;
@@ -397,6 +645,10 @@ function App() {
   const [chats, setChats] = useState([]);
   const [copiedId, setCopiedId] = useState(null);
   const [toast, setToast] = useState(null);
+  const [theme, setTheme] = useState(readTheme);
+  const [leftOpen, setLeftOpen] = useState(true);
+  const [rightOpen, setRightOpen] = useState(true);
+  const [loading, setLoading] = useState(false);
   const freshIds = useRef(new Set());
   const [, bump] = useState(0);
 
@@ -407,6 +659,15 @@ function App() {
   };
 
   const say = (m) => { setToast(m); setTimeout(() => setToast(null), 2600); };
+
+  // DIQQAT: yon ta'sirni setState updateri ICHIGA qo'ymang. React updater
+  // funksiyasini bir necha marta chaqirishi mumkin (eager evaluation), shunda
+  // mavzu ikki marta almashib, o'z joyiga qaytib qoladi — tugma "ishlamaydi".
+  const toggleTheme = useCallback(() => {
+    const next = readTheme() === "light" ? "dark" : "light";
+    writeTheme(next);
+    setTheme(next);
+  }, []);
 
   const loadProjects = useCallback(async (client) => {
     const { data } = await client.from("projects")
@@ -439,22 +700,26 @@ function App() {
   }, []);
 
   const load = useCallback(async (client) => {
-    const list = await loadProjects(client);
-    await loadTree(client, activeId ?? list[0]?.id ?? null);
+    setLoading(true);
+    try {
+      const list = await loadProjects(client);
+      await loadTree(client, activeId ?? list[0]?.id ?? null);
+      say("Up to date");
+    } finally { setLoading(false); }
   }, [loadProjects, loadTree, activeId]);
 
   const newProject = useCallback(async () => {
-    const name = prompt("Loyiha nomi:");
+    const name = prompt("Project name:");
     if (!name?.trim()) return;
     const { data: wm } = await sb.from("workspace_members").select("workspace_id").limit(1);
     const ws = wm?.[0]?.workspace_id;
-    if (!ws) { say("Workspace topilmadi"); return; }
+    if (!ws) { say("No workspace found"); return; }
     const { data, error } = await sb.from("projects")
       .insert({ workspace_id: ws, name: name.trim() }).select("id,name").single();
-    if (error) { say("Xato: " + error.message); return; }
+    if (error) { say("Error: " + error.message); return; }
     await loadProjects(sb);
     setActiveId(data.id);
-    say(`"${data.name}" yaratildi`);
+    say(`"${data.name}" created`);
   }, [sb, loadProjects]);
 
   const copyText = useCallback(async (textToCopy, markId, toastMsg) => {
@@ -470,18 +735,20 @@ function App() {
     say(toastMsg);
   }, []);
 
+  // DIQQAT: ulash iborasi o'zbekcha qoladi — uni skill "Chat Manager: ula →"
+  // shakli bo'yicha taniydi. Ingliz tiliga o'girilsa mos kelmay qoladi.
   const copyPhrase = useCallback((p) =>
     copyText(
       `Chat Manager: ula → ${p.name} (${p.id})`,
       p.id,
-      "Ulash iborasi nusxalandi — yangi chatning birinchi xabariga qo'ying",
+      "Connect phrase copied — paste it as the first message of a new chat",
     ), [copyText]);
 
   const copyRecovery = useCallback(() =>
     copyText(
       RECOVERY_PROMPT,
       "__recovery__",
-      "Tiklash prompti nusxalandi — tasklar tushib qolgan chatga yuboring",
+      "Recovery prompt copied — send it to the chat that lost tasks",
     ), [copyText]);
 
   useEffect(() => { if (sb) loadProjects(sb); }, [sb, loadProjects]);
@@ -515,7 +782,7 @@ function App() {
   }, [sb, activeId, loadTree]);
 
   if (sb === undefined && !demo) {
-    return html`<${Gate} initial=${saved}
+    return html`<${Gate} initial=${saved} theme=${theme} onTheme=${toggleTheme}
                   onReady=${(client) => {
                     if (client) setSb(client);
                     else {
@@ -531,38 +798,50 @@ function App() {
   }
 
   const counts = nodes.reduce((a, n) => { a[n.status] = (a[n.status] ?? 0) + 1; return a; }, {});
+  const activeName = projects.find((p) => p.id === activeId)?.name ?? "";
 
   return html`
     <div class="app">
       <div class="top">
         <div class="brand">Chat <span>Manager</span></div>
         <div class="stats">
-          <span><b>${nodes.length}</b> tugun</span>
-          <span><b>${counts.done ?? 0}</b> bajarildi</span>
-          <span><b>${counts.in_progress ?? 0}</b> jarayonda</span>
-          ${counts.blocked ? html`<span><b>${counts.blocked}</b> to'sildi</span>` : null}
+          <span><b>${nodes.length}</b> nodes</span>
+          <span><i class="sq" style=${{ background: "var(--done)" }}></i><b>${counts.done ?? 0}</b> done</span>
+          <span><i class="sq" style=${{ background: "var(--prog)" }}></i><b>${counts.in_progress ?? 0}</b> in progress</span>
+          ${counts.blocked
+            ? html`<span><i class="sq" style=${{ background: "var(--block)" }}></i><b>${counts.blocked}</b> blocked</span>`
+            : null}
         </div>
         <div class="spacer"></div>
-        ${activeId
-          ? html`<span class="stats">${projects.find((p) => p.id === activeId)?.name ?? ""}</span>`
-          : null}
+        ${activeName ? html`<div class="crumb"><${Icon} n="folder" /><b>${activeName}</b></div>` : null}
         <div class="live">
           <span class=${"dot " + (demo ? "off" : live ? "live" : "off")}></span>
-          ${demo ? "demo" : live ? "jonli" : "ulanmoqda"}
+          ${demo ? "Demo" : live ? "Live" : "Connecting"}
         </div>
-        ${!demo ? html`<button onClick=${() => load(sb)}>Yangilash</button>` : null}
+        <button class="icon ghost" title="Toggle theme" onClick=${toggleTheme}>
+          <${Icon} n=${theme === "light" ? "moon" : "sun"} />
+        </button>
+        ${!demo
+          ? html`<button class="ghost" onClick=${() => load(sb)}><${Icon} n="refresh" />Refresh</button>`
+          : null}
       </div>
-      <div class="body">
+
+      <div class="body" data-left=${leftOpen ? "on" : "off"} data-right=${rightOpen ? "on" : "off"}>
         <${Projects} projects=${projects} activeId=${activeId} chats=${chats}
-                     copiedId=${copiedId}
+                     copiedId=${copiedId} loading=${loading}
+                     open=${leftOpen} onToggle=${setLeftOpen}
                      onPick=${(id) => { setActiveId(id); setSelected(null); }}
-                     onNew=${demo ? () => say("Demo rejimida yaratib bo'lmaydi") : newProject}
+                     onNew=${demo ? () => say("Creating projects is disabled in demo mode") : newProject}
                      onCopy=${copyPhrase} onRecovery=${copyRecovery} />
         <${Canvas} key=${activeId} nodes=${nodes} selected=${selected} onSelect=${setSelected}
                    freshIds=${freshIds.current} />
-        <${Side} selected=${selected} events=${events} />
+        <${Side} selected=${selected} events=${events} chats=${chats} loading=${loading}
+                 open=${rightOpen} onToggle=${setRightOpen} />
       </div>
-      ${toast ? html`<div class="toast">${toast}</div>` : null}
+
+      <div class=${"toast" + (toast ? " show" : "")}>
+        <span class="ok"><${Icon} n="check" /></span>${toast ?? ""}
+      </div>
     </div>`;
 }
 
