@@ -31,7 +31,29 @@ if (!shell.includes("<script>/*__APP__*/</script>")) {
   throw new Error("shell.html ichida <script>/*__APP__*/</script> belgisi topilmadi");
 }
 
-const html = shell.replace("<script>/*__APP__*/</script>", `<script>\n${js}\n</script>`);
+// DIQQAT: replace() ga MATN emas, FUNKSIYA beriladi.
+// Matn berilsa, JS undagi `$&`, `` $` ``, `$'` ketma-ketliklarini maxsus
+// buyruq deb talqin qiladi va minifikatsiyalangan bundle o'z-o'zini buzadi.
+// Funksiya qaytargan qiymat esa xom holda qo'yiladi.
+const html = shell.replace(
+  "<script>/*__APP__*/</script>",
+  () => `<script>\n${js}\n</script>`,
+);
+
+// Yaxlitlik tekshiruvi — buzuq fayl deploy bo'lib ketmasin.
+// `$&` xatosi shellni ikki marta ko'chirib qo'yardi va sahifa bo'sh ochilardi;
+// bunday holat endi build bosqichida yiqiladi.
+const problems = [];
+if (html.includes("/*__APP__*/")) problems.push("belgi almashtirilmagan");
+if ((html.match(/<!DOCTYPE/gi) ?? []).length !== 1) problems.push("DOCTYPE bitta emas");
+if ((html.match(/<body>/gi) ?? []).length !== 1) problems.push("<body> bitta emas");
+if (!html.includes("createRoot")) problems.push("React ilova topilmadi");
+if (html.length < 100_000) problems.push(`fayl juda kichik (${html.length} bayt)`);
+
+if (problems.length) {
+  console.error("BUILD BUZUQ:\n  · " + problems.join("\n  · "));
+  process.exit(1);
+}
 
 await mkdir(join(root, "web"), { recursive: true });
 await writeFile(join(root, "web", "index.html"), html);
