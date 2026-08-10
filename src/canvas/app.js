@@ -37,10 +37,74 @@ const NW = 250, GAP_X = 90, GAP_Y = 20;
    250px kenglikda ~30 belgi bir qatorga sig'adi. Kam baholansa tugunlar
    bir-biriga tegib qoladi (birinchi versiyada aynan shunday bo'ldi).
    CHROME 45 -> 48: yangi dizaynda padding va n-meta balandligi oshdi. */
-const CHARS_PER_LINE = 30, LINE_H = 19, CHROME = 48;
+const LINE_H = 19, CHROME = 48;
+
+/* Chip kengliklari brauzerda O'LCHANGAN (250px tugun, 10px uppercase, .05em).
+   Belgi soniga ko'paytirish ishonchsiz: "In progress" da ikkita bo'sh joy bor
+   va u "Has open work" dan qisqa, garchi harflari ko'p bo'lsa ham. */
+const CHIP_W = {
+  "To do": 52, "In progress": 96, "Done": 49, "Blocked": 70, "Cancelled": 84,
+  "Milestone": 84, "Guess": 54, "Has open work": 117,
+};
+const META_INNER = 250 - 14 - 13;   // tugun kengligi minus padding
+const META_GAP = 7, META_ROW = 23;  // chip balandligi 17 + row-gap 6
+
+/* Chiplar bir qatorga sig'masa qatorga bo'linadi. Balandlikni OLDINDAN
+   bilishimiz shart: layout render'dan oldin hisoblanadi va kam baholansa
+   tugun pastdagisining ustiga chiqadi. */
+function metaRows(n) {
+  const labels = [STATUS_EN[n.status] ?? n.status];
+  if (n.type === "milestone") labels.push("Milestone");
+  if (n.is_ghost) labels.push("Guess");
+  if (n.ctx) labels.push("Has open work");
+
+  let rows = 1, w = 0;
+  for (const l of labels) {
+    const cw = CHIP_W[l] ?? (20 + 7 * l.length);
+    if (w === 0) { w = cw; continue; }
+    if (w + META_GAP + cw > META_INNER) { rows++; w = cw; }
+    else w += META_GAP + cw;
+  }
+  return rows;
+}
+
+/* Sarlavha qatorlari. `belgi / 30` formulasi YARAMAYDI: o'rash so'z
+   chegarasida bo'ladi. "Fix the cursor crash on resume" — 30 belgi, ya'ni
+   formulaga ko'ra 1 qator, aslida 2 qator, va tugun pastdagisining ustiga
+   chiqib qolardi. Shuning uchun o'rash simulyatsiya qilinadi.
+   7.8 — brauzerda o'lchangan 13 ta sarlavhada kalibrlangan; biroz yuqoriroq
+   olingan, chunki ortiqcha baho faqat bo'sh joy qoldiradi, kam baho esa
+   tugunlarni bir-birining ustiga chiqaradi. */
+const CHAR_W = 7.8, TITLE_W = 250 - 14 - 13;
+
+function titleLines(title) {
+  const words = String(title ?? "").trim().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return 1;
+
+  let rows = 1, used = 0;
+  for (const word of words) {
+    const ww = word.length * CHAR_W;
+
+    // Bo'sh joysiz uzun so'z (URL, snake_case ID) o'zi bo'linadi
+    if (ww > TITLE_W) {
+      if (used > 0) { rows++; used = 0; }
+      const need = Math.ceil(ww / TITLE_W);
+      rows += need - 1;
+      used = ww - (need - 1) * TITLE_W;
+      continue;
+    }
+
+    if (used === 0) used = ww;
+    else if (used + CHAR_W + ww > TITLE_W) { rows++; used = ww; }
+    else used += CHAR_W + ww;
+  }
+  return rows;
+}
+
 function nodeH(n) {
-  const lines = Math.max(1, Math.ceil(String(n.title ?? "").length / CHARS_PER_LINE));
-  return CHROME + Math.min(lines, 4) * LINE_H;
+  const lines = Math.min(titleLines(n.title), 4);   // CSS 4 qatorda kesadi
+  const extra = (n.synthetic ? 1 : metaRows(n)) - 1;
+  return CHROME + lines * LINE_H + extra * META_ROW;
 }
 
 function layout(nodes) {
