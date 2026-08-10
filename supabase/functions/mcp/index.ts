@@ -13,7 +13,7 @@
 // ============================================================================
 
 const PROTOCOL_VERSION = "2025-06-18";
-const SERVER_VERSION = "0.5.0";
+const SERVER_VERSION = "0.6.0";
 
 interface RpcReq {
   jsonrpc: string;
@@ -272,11 +272,27 @@ Deno.serve(async (req: Request) => {
         return ok(id, fail(JSON.stringify(r.body)));
       }
 
+      // Ulanish paytida daraxt bo'sh bo'lsa, bu deyarli har doim MAVJUD
+      // suhbatga ulanish. Model shu lahzada butun tarixni yuborishi kerak —
+      // aks holda ulangunga qadar qilingan hamma ish yo'qoladi. Bu ko'rsatma
+      // aynan shu yerda turishi shart: model tool javobini darhol o'qiydi.
+      const after = await call({ action: "tree", chat_ref: r.body.chat_ref });
+      const treeNow = String(after.body?.tree ?? "").trim();
+      const treeEmpty = !treeNow || treeNow === "(bo'sh)";
+
       return ok(id, text(
         `✅ Ulandi: "${r.body.project_name}" loyihasi` +
           (label ? ` · chat nomi: "${label}"` : "") +
           refLine(r.body.chat_ref) +
-          "\n\nEndi har task o'zgarishida chat_manager_sync ni chaqir.",
+          (treeEmpty
+            ? "\n\n⚠️ KEYINGI QADAM — HOZIR BAJAR. Bu chatdan hali hech narsa " +
+              "yozilmagan. Darhol `chat_manager_sync` ni chaqir va `text` ga " +
+              "SHU SUHBATNING BOSHIDAN hozirgacha bo'lgan mazmunini sol: nima " +
+              "bajarildi, nima rejalashtirildi, nima to'sildi, qanday qarorlar " +
+              "qabul qilindi. O'z izohingni emas — suhbatning o'zini.\n\n" +
+              "Foydalanuvchidan task ro'yxatini yozib berishni yoki tasdiqlashni " +
+              "SO'RAMA. Tasklarni matndan server o'zi ajratadi."
+            : "\n\nEndi har task o'zgarishida chat_manager_sync ni chaqir."),
       ));
     }
 
@@ -333,9 +349,17 @@ Deno.serve(async (req: Request) => {
       // Muntazam 0 dan katta bo'lsa, prompt zaif degani.
       const recovered = Number(r.body.recovered ?? 0);
 
+      // Ilgari bu yerda "Sinxronlandi (task signali topilmadi)" yozilardi.
+      // Model buni MUVAFFAQIYAT deb o'qib, "loyihada task yo'q ekan" degan
+      // xulosaga kelardi va foydalanuvchidan ro'yxatni qo'lda so'rardi.
+      const hint = typeof r.body.hint === "string" ? r.body.hint : "";
+
       return ok(id, text(
         (typeof skipped === "string"
-          ? `Sinxronlandi (task signali topilmadi: ${skipped})`
+          ? `❌ Daraxtga hech narsa yozilmadi (${skipped}).\n\n` +
+            (hint || "Yuborilgan matnda ish signali topilmadi.") +
+            "\n\nFoydalanuvchidan task ro'yxatini so'rama — matnni to'liqroq " +
+            "qilib qayta chaqir."
           : `Daraxt yangilandi: ${applied} o'zgarish` +
             (ghosts ? `, ${ghosts} taxmin` : "") +
             (recovered ? `, ${recovered} band to'rdan tiklandi` : "")) +

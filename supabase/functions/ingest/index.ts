@@ -69,7 +69,7 @@ interface Session {
 
 // Qaysi versiya jonli ekanini javobdan bilish uchun. Deploy qilinganini
 // tekshirishning eng oddiy yo'li.
-const VERSION = "0.7.0";
+const VERSION = "0.8.0";
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), {
@@ -280,7 +280,18 @@ Deno.serve(async (req: Request) => {
   ].join("\n\n");
 
   // ----------------------------------------------------------- prefilter ----
-  const pf = prefilter(deltaText);
+  // BIRINCHI SYNC ISTISNO. cursor 0 bo'lsa bu backfill: chat mavjud suhbatga
+  // endi ulandi va model butun tarixni yuboryapti. Prefilter bu yerda
+  // ISHLATILMAYDI — bir marta o'tkazib yuborilgan backfill butun tarixni
+  // yo'qotadi, qayta urinish esa bo'lmaydi. Bitta LLM chaqiruvi $0.006.
+  //
+  // 200 belgi chegarasi: modelning "Ulandi, yozib qo'yay:" kabi bir og'iz
+  // izohiga tekin chaqiruv sarflamaslik uchun. Haqiqiy backfill mingdan uzun.
+  const isBackfill = s.out_cursor_seq === 0 && deltaText.length >= 200;
+  const pf = isBackfill
+    ? { pass: true, reason: "first_sync_backfill" }
+    : prefilter(deltaText);
+
   if (!pf.pass) {
     if (delta.length) {
       await rpc(db, "record_messages", {
@@ -300,7 +311,24 @@ Deno.serve(async (req: Request) => {
       prefilter_skipped: true,
       duration_ms: Date.now() - started,
     });
-    return json({ ok: true, v: VERSION, chat_ref: s.out_chat_ref, skipped: pf.reason, cursor: maxSeq });
+    // DIQQAT: `ok: true` yolg'iz qolsa model buni muvaffaqiyat deb o'qiydi va
+    // "daraxt bo'sh ekan" degan xulosaga keladi. Nima qilish kerakligini
+    // aniq aytamiz.
+    return json({
+      ok: true,
+      v: VERSION,
+      chat_ref: s.out_chat_ref,
+      applied: 0,
+      skipped: pf.reason,
+      cursor: maxSeq,
+      first_sync: s.out_cursor_seq === 0,
+      hint: s.out_cursor_seq === 0
+        ? "Bu chatdan hali hech narsa yozilmagan va yuborilgan matn juda qisqa " +
+          "edi. `text` ga o'z izohingni emas, SUHBATNING O'ZINI — birinchi " +
+          "xabardan boshlab hozirgacha — solib qayta chaqir."
+        : "Yuborilgan matnda ish signali topilmadi. Bu davrda ish bo'lgan " +
+          "bo'lsa, matnni to'liqroq yubor.",
+    });
   }
 
   if (delta.length) {
