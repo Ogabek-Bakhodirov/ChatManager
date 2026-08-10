@@ -5,6 +5,7 @@
   "type": "module",
   "description": "AI suhbatidan task daraxtini avtomatik yig'adigan tizim",
   "scripts": {
+    "build": "node src/canvas/build.mjs",
     "build:canvas": "node src/canvas/build.mjs"
   },
   "devDependencies": {
