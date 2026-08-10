@@ -362,7 +362,18 @@ input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px 
 .node.fresh { animation: pop .5s cubic-bezier(.2,1,.4,1); }
 @keyframes pop { from { transform: scale(.9); opacity: 0 } to { transform: scale(1); opacity: 1 } }
 
-.n-title { font-weight: 550; font-size: 13px; line-height: 19px; color: var(--text); }
+/* Sarlavha ikki xil buzilishdan himoyalanadi:
+   1. `0007_chat_ref_and_workspace_tokens` kabi uzilish nuqtasi yo'q so'z
+      tugundan chetga chiqib ketardi -> overflow-wrap: anywhere.
+   2. Balandlik JS'da 4 qatorga hisoblanadi (nodeH). Undan uzun sarlavha
+      pastdagi tugun ustiga chiqib qolardi -> 4 qatordan keyin kesiladi.
+      To'liq matn tugunning title atributida qoladi. */
+.n-title {
+  font-weight: 550; font-size: 13px; line-height: 19px; color: var(--text);
+  overflow-wrap: anywhere; word-break: break-word;
+  display: -webkit-box; -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4; line-clamp: 4; overflow: hidden;
+}
 .node.s-done .n-title { color: var(--muted); text-decoration: line-through;
                         text-decoration-color: var(--edge); }
 .node.s-cancelled .n-title { text-decoration: line-through; text-decoration-color: var(--edge); }
@@ -417,7 +428,7 @@ input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px 
    ============================================================ */
 .ev { padding: 4px 14px 14px; }
 .ev .ti { font-size: 14px; font-weight: 600; line-height: 1.35; letter-spacing: -.01em;
-          color: var(--text); }
+          color: var(--text); overflow-wrap: anywhere; }
 .ev .q {
   color: var(--text-dim); font-size: 12.5px; line-height: 1.6; margin: 12px 0 0;
   padding: 11px 12px 11px 13px; background: var(--panel-2); border: 1px solid var(--line-soft);
@@ -442,7 +453,8 @@ input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px 
   content: ""; position: absolute; left: 50%; top: 11px; bottom: -22px;
   width: 1px; background: var(--line); transform: translateX(-50%);
 }
-.feed b { color: var(--text); font-weight: 550; }
+.feed b { color: var(--text); font-weight: 550; overflow-wrap: anywhere; }
+.feed > div > div { min-width: 0; }
 .feed .op { color: var(--muted); }
 .feed .t { font-size: 11px; color: var(--faint); margin-top: 3px;
            font-variant-numeric: tabular-nums; }
@@ -570,7 +582,7 @@ ${g}`}var Q=class extends Error{constructor({message:e,code:r,cause:n,name:s}){v
 Menga faqat qisqa hisobot ber: nechta yangi qo'shildi, nechta status o'zgardi.`,Xu=250,Zu=90,pg=20,ew=30,tw=19,rw=48;function Xs(t){let e=Math.max(1,Math.ceil(String(t.title??"").length/ew));return rw+Math.min(e,4)*tw}function nw(t){let e=new Map(t.map(u=>[u.id,u])),r=new Map,n=[];for(let u of t){let c=u.parent_id&&e.has(u.parent_id)?u.parent_id:null;c?(r.has(c)||r.set(c,[]),r.get(c).push(u)):n.push(u)}let s=(u,c)=>(u.position??0)-(c.position??0)||String(u.title).localeCompare(String(c.title));n.sort(s);for(let u of r.values())u.sort(s);let i=new Map,o=0,a=(u,c)=>{let d=r.get(u.id)??[],f=c*(Xu+Zu);if(d.length===0){let _=o;return o+=Xs(u)+pg,i.set(u.id,{x:f,y:_,h:Xs(u)}),_+Xs(u)/2}let h=d.map(_=>a(_,c+1)),v=(h[0]+h[h.length-1])/2,y=v-Xs(u)/2;return i.set(u.id,{x:f,y,h:Xs(u)}),v};for(let u of n)a(u,0),o+=pg*1.6;let l=[];for(let[u,c]of r)if(i.has(u))for(let d of c)i.has(d.id)&&l.push([u,d.id]);return{pos:i,edges:l,width:(sw(t,e)+1)*(Xu+Zu),height:o}}function sw(t,e){let r=0;for(let n of t){let s=0,i=n,o=0;for(;i?.parent_id&&e.has(i.parent_id)&&o++<20;)s++,i=e.get(i.parent_id);s>r&&(r=s)}return r}var iw={plus:'<path d="M8 3.2v9.6M3.2 8h9.6"/>',minus:'<path d="M3.2 8h9.6"/>',fit:'<path d="M6 2.6H2.6V6M10 2.6h3.4V6M10 13.4h3.4V10M6 13.4H2.6V10"/>',copy:'<rect x="5.6" y="5.6" width="7.4" height="7.4" rx="1.8"/><path d="M10.4 3.6V3A1.6 1.6 0 0 0 8.8 1.4H4A1.6 1.6 0 0 0 2.4 3v4.8c0 .88.72 1.6 1.6 1.6h.6"/>',check:'<path d="M2.8 8.4 6.1 11.6 13.2 4.4"/>',left:'<path d="M9.8 3.4 5.2 8l4.6 4.6"/>',right:'<path d="M6.2 3.4 10.8 8l-4.6 4.6"/>',moon:'<path d="M13 9.6A5.6 5.6 0 0 1 6.4 3 5.6 5.6 0 1 0 13 9.6Z"/>',sun:'<circle cx="8" cy="8" r="3.1"/><path d="M8 1.4v1.6M8 13v1.6M1.4 8h1.6M13 8h1.6M3.4 3.4l1.1 1.1M11.5 11.5l1.1 1.1M12.6 3.4l-1.1 1.1M4.5 11.5l-1.1 1.1"/>',refresh:'<path d="M13.4 6.6A5.6 5.6 0 0 0 3.3 4.9M2.6 9.4a5.6 5.6 0 0 0 10.1 1.7"/><path d="M13.4 3.2v3.4H10M2.6 12.8V9.4H6"/>',folder:'<path d="M1.9 4.4c0-.9.7-1.6 1.6-1.6h2.2l1.5 1.7h5.3c.9 0 1.6.7 1.6 1.6v5.5c0 .9-.7 1.6-1.6 1.6H3.5c-.9 0-1.6-.7-1.6-1.6Z"/>',chat:'<path d="M13.6 8.9c0 2.3-2.5 4.2-5.6 4.2-.7 0-1.4-.1-2-.3l-3 1.1.9-2.4A4.4 4.4 0 0 1 2.4 8.9c0-2.3 2.5-4.2 5.6-4.2s5.6 1.9 5.6 4.2Z"/>',quote:'<path d="M4.6 11.4c-1.4 0-2.2-1-2.2-2.4 0-2.4 1.6-4.6 3.8-5.8l.7 1.2C5.5 5.2 4.6 6.2 4.4 7.3c1.4 0 2.4.8 2.4 2.1 0 1.2-.9 2-2.2 2ZM11.4 11.4c-1.4 0-2.2-1-2.2-2.4 0-2.4 1.6-4.6 3.8-5.8l.7 1.2c-1.4 1-2.3 2-2.5 3.1 1.4 0 2.4.8 2.4 2.1 0 1.2-.9 2-2.2 2Z"/>',pulse:'<path d="M1.6 8h2.8l1.7-4.4L8.4 12l1.8-4h3.2"/>',spark:'<path d="M8 1.8v3.4M8 10.8v3.4M1.8 8h3.4M10.8 8h3.4"/><circle cx="8" cy="8" r="2.2"/>',key:'<circle cx="5.4" cy="10.6" r="2.8"/><path d="M7.4 8.6l5.2-5.2M10.2 5.8l1.6 1.6"/>'};function H({n:t}){return N`<svg class="i" viewBox="0 0 16 16"
                 dangerouslySetInnerHTML=${{__html:iw[t]??""}} />`}function gg(){return document.documentElement.getAttribute("data-theme")==="light"?"light":"dark"}function ow(t){document.documentElement.setAttribute("data-theme",t);try{localStorage.setItem(Z0,t)}catch{}}var mg=[{id:"1",parent_id:null,title:"F0 Foundation",status:"done",position:0,type:"milestone"},{id:"2",parent_id:"1",title:"Create the 9 core tables",status:"done",position:0},{id:"3",parent_id:"1",title:"Write the RLS policies",status:"done",position:1},{id:"4",parent_id:"1",title:"Ship the apply_ops function",status:"done",position:2,evidence_quote:"apply_ops applies operations atomically, behind an advisory lock, so two chats can never interleave."},{id:"5",parent_id:"1",title:"Test the migration on Postgres",status:"done",position:3},{id:"6",parent_id:null,title:"F1 Hook adapter",status:"in_progress",position:1,type:"milestone"},{id:"7",parent_id:"6",title:"Publish the npm package",status:"done",position:0},{id:"8",parent_id:"6",title:"Transcript parser",status:"done",position:1},{id:"9",parent_id:"6",title:"Background sync worker",status:"in_progress",position:2,evidence_quote:"Worker runs every 30s and batches into one apply_ops call."},{id:"10",parent_id:"6",title:"Fix the cursor crash on resume",status:"blocked",position:3},{id:"11",parent_id:null,title:"F2 Canvas",status:"todo",position:2,type:"milestone"},{id:"12",parent_id:"11",title:"Draw the task tree",status:"in_progress",position:0},{id:"13",parent_id:"11",title:"Realtime subscription",status:"todo",position:1},{id:"14",parent_id:"11",title:"Inline node editing",status:"todo",position:2,is_ghost:!0}],aw=[{id:3,op:"set_status",created_at:new Date().toISOString(),payload:{title:"Transcript parser",status:"done"}},{id:2,op:"add_node",created_at:new Date(Date.now()-4e5).toISOString(),payload:{title:"Fix the cursor crash on resume"}},{id:1,op:"add_node",created_at:new Date(Date.now()-9e5).toISOString(),payload:{title:"Background sync worker"}}],ec={todo:"To do",in_progress:"In progress",done:"Done",blocked:"Blocked",cancelled:"Cancelled"},lw={add_node:"added",set_status:"status",rename:"renamed",move:"moved",delete:"deleted",ghost_expired:"guess expired",merge:"merged"},uw={todo:"todo",in_progress:"prog",done:"done",blocked:"block",cancelled:"cancel"};function cw(t){let e=new Date(t).getTime();if(!Number.isFinite(e))return"";let r=Math.max(0,Math.round((Date.now()-e)/1e3));return r<60?r+"s ago":r<3600?Math.round(r/60)+"m ago":r<86400?Math.round(r/3600)+"h ago":Math.round(r/86400)+"d ago"}function dw({n:t,x:e,y:r,selected:n,fresh:s,onClick:i}){let o=["node",`s-${t.status}`,t.is_ghost?"ghost":"",n?"sel":"",s?"fresh":""].filter(Boolean).join(" ");return N`
     <div class=${o} style=${{left:e+"px",top:r+"px"}} onClick=${()=>i(t)}>
-      <div class="n-title">${t.title}</div>
+      <div class="n-title" title=${t.title??""}>${t.title}</div>
       <div class="n-meta">
         <span class=${"chip s-"+t.status}>${ec[t.status]??t.status}</span>
         ${t.type==="milestone"?N`<span class="chip">Milestone</span>`:null}
@@ -657,7 +669,7 @@ Menga faqat qisqa hisobot ber: nechta yangi qo'shildi, nechta status o'zgardi.`,
                      onClick=${()=>r(h.id)}>
                   <div class="av">${String(h.name??"?").slice(0,1).toUpperCase()}</div>
                   <div class="nm">
-                    <div class="t">${h.name}</div>
+                    <div class="t" title=${h.name??""}>${h.name}</div>
                     <div class="ct">
                       ${h.nodes??0} nodes
                       ${h.id===e&&a.length?N`<i></i>${d} chat${d===1?"":"s"}`:null}

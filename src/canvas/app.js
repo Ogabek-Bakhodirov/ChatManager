@@ -201,7 +201,7 @@ function Node({ n, x, y, selected, fresh, onClick }) {
   ].filter(Boolean).join(" ");
   return html`
     <div class=${cls} style=${{ left: x + "px", top: y + "px" }} onClick=${() => onClick(n)}>
-      <div class="n-title">${n.title}</div>
+      <div class="n-title" title=${n.title ?? ""}>${n.title}</div>
       <div class="n-meta">
         <span class=${"chip s-" + n.status}>${STATUS_EN[n.status] ?? n.status}</span>
         ${n.type === "milestone" ? html`<span class="chip">Milestone</span>` : null}
@@ -421,7 +421,7 @@ function Projects({ projects, activeId, onPick, onNew, onCopy, onRecovery, copie
                      onClick=${() => onPick(p.id)}>
                   <div class="av">${String(p.name ?? "?").slice(0, 1).toUpperCase()}</div>
                   <div class="nm">
-                    <div class="t">${p.name}</div>
+                    <div class="t" title=${p.name ?? ""}>${p.name}</div>
                     <div class="ct">
                       ${p.nodes ?? 0} nodes
                       ${p.id === activeId && chats.length

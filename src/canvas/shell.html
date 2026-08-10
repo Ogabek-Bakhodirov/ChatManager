@@ -362,7 +362,18 @@ input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px 
 .node.fresh { animation: pop .5s cubic-bezier(.2,1,.4,1); }
 @keyframes pop { from { transform: scale(.9); opacity: 0 } to { transform: scale(1); opacity: 1 } }
 
-.n-title { font-weight: 550; font-size: 13px; line-height: 19px; color: var(--text); }
+/* Sarlavha ikki xil buzilishdan himoyalanadi:
+   1. `0007_chat_ref_and_workspace_tokens` kabi uzilish nuqtasi yo'q so'z
+      tugundan chetga chiqib ketardi -> overflow-wrap: anywhere.
+   2. Balandlik JS'da 4 qatorga hisoblanadi (nodeH). Undan uzun sarlavha
+      pastdagi tugun ustiga chiqib qolardi -> 4 qatordan keyin kesiladi.
+      To'liq matn tugunning title atributida qoladi. */
+.n-title {
+  font-weight: 550; font-size: 13px; line-height: 19px; color: var(--text);
+  overflow-wrap: anywhere; word-break: break-word;
+  display: -webkit-box; -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4; line-clamp: 4; overflow: hidden;
+}
 .node.s-done .n-title { color: var(--muted); text-decoration: line-through;
                         text-decoration-color: var(--edge); }
 .node.s-cancelled .n-title { text-decoration: line-through; text-decoration-color: var(--edge); }
@@ -417,7 +428,7 @@ input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px 
    ============================================================ */
 .ev { padding: 4px 14px 14px; }
 .ev .ti { font-size: 14px; font-weight: 600; line-height: 1.35; letter-spacing: -.01em;
-          color: var(--text); }
+          color: var(--text); overflow-wrap: anywhere; }
 .ev .q {
   color: var(--text-dim); font-size: 12.5px; line-height: 1.6; margin: 12px 0 0;
   padding: 11px 12px 11px 13px; background: var(--panel-2); border: 1px solid var(--line-soft);
@@ -442,7 +453,8 @@ input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px 
   content: ""; position: absolute; left: 50%; top: 11px; bottom: -22px;
   width: 1px; background: var(--line); transform: translateX(-50%);
 }
-.feed b { color: var(--text); font-weight: 550; }
+.feed b { color: var(--text); font-weight: 550; overflow-wrap: anywhere; }
+.feed > div > div { min-width: 0; }
 .feed .op { color: var(--muted); }
 .feed .t { font-size: 11px; color: var(--faint); margin-top: 3px;
            font-variant-numeric: tabular-nums; }
