@@ -188,6 +188,12 @@ const ICO = {
   pulse: '<path d="M1.6 8h2.8l1.7-4.4L8.4 12l1.8-4h3.2"/>',
   spark: '<path d="M8 1.8v3.4M8 10.8v3.4M1.8 8h3.4M10.8 8h3.4"/><circle cx="8" cy="8" r="2.2"/>',
   key: '<circle cx="5.4" cy="10.6" r="2.8"/><path d="M7.4 8.6l5.2-5.2M10.2 5.8l1.6 1.6"/>',
+  more: '<circle cx="3.2" cy="8" r="1.15" fill="currentColor" stroke="none"/><circle cx="8" cy="8" r="1.15" fill="currentColor" stroke="none"/><circle cx="12.8" cy="8" r="1.15" fill="currentColor" stroke="none"/>',
+  pin: '<path d="M9.6 1.9 14.1 6.4l-2 .5-1 1-.5 3.1-4.6-4.6 3.1-.5 1-1Z"/><path d="M6 10 2.4 13.6"/>',
+  unpin: '<path d="M9.6 1.9 14.1 6.4l-2 .5-1 1-.5 3.1-4.6-4.6 3.1-.5 1-1Z"/><path d="M6 10 2.4 13.6"/><path d="M2 2l12 12"/>',
+  pencil: '<path d="M11.3 2.6a1.6 1.6 0 0 1 2.3 2.3L5.4 13l-3 .7.7-3Z"/><path d="M10.2 3.7l2.1 2.1"/>',
+  link: '<path d="M6.8 9.2a2.8 2.8 0 0 0 4 0l2.1-2.1a2.83 2.83 0 0 0-4-4l-1 1"/><path d="M9.2 6.8a2.8 2.8 0 0 0-4 0L3.1 8.9a2.83 2.83 0 0 0 4 4l1-1"/>',
+  trash: '<path d="M2.8 4.4h10.4M6.4 4.4V2.9h3.2v1.5M4.3 4.4l.6 8.5a1 1 0 0 0 1 .9h4.2a1 1 0 0 0 1-.9l.6-8.5"/>',
 };
 
 function Icon({ n }) {
@@ -566,22 +572,89 @@ function Canvas({ nodes, selected, onSelect, freshIds, hiddenCount = 0 }) {
 
 function Projects({ projects, activeId, onPick, onNew, onCopy, onRecovery, copiedId,
                     chats, open, onToggle, loading,
-                    onRename, onArchive, onDelete, demo }) {
+                    onRename, onArchive, onDelete, onCopyLink, onTogglePin, isPinned, demo }) {
   const linked = chats.filter((c) => c.status === "linked").length;
   const pending = chats.length - linked;
 
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState("");
-  const [menuFor, setMenuFor] = useState(null);   // menyu ochilgan loyiha id
+  const [menu, setMenu] = useState(null);         // { id, top?, bottom?, right }
+  const [cur, setCur] = useState(0);              // klaviatura bilan tanlangan band
   const [editing, setEditing] = useState(null);   // nomi tahrirlanayotgan id
   const [draft, setDraft] = useState("");
 
-  const startRename = (p) => { setMenuFor(null); setEditing(p.id); setDraft(p.name ?? ""); };
+  const closeMenu = () => { setMenu(null); setCur(0); };
+
+  const startRename = (p) => { closeMenu(); setEditing(p.id); setDraft(p.name ?? ""); };
   const commitRename = (p) => {
     const name = draft.trim();
     setEditing(null);
     if (name && name !== p.name) onRename(p, name);
   };
+
+  /* Menyu bandlari bitta joyda: sichqoncha, ↑↓+Enter va bitta harf —
+     uchalasi ham shu ro'yxatdan ishlaydi, takrorlanish yo'q. */
+  const itemsFor = (p) => [
+    { k: "P", label: isPinned(p.id) ? "Unpin" : "Pin to top",
+      icon: isPinned(p.id) ? "unpin" : "pin", run: () => onTogglePin(p) },
+    { k: "R", label: "Rename", icon: "pencil", run: () => startRename(p) },
+    { k: "C", label: "Copy connect phrase", icon: "copy", run: () => onCopy(p) },
+    { k: "U", label: "Copy project link", icon: "link", soon: true },
+    { div: true },
+    { k: "A", label: "Archive", icon: "folder", run: () => onArchive(p) },
+    { k: "D", label: "Delete", icon: "trash", danger: true, run: () => onDelete(p) },
+  ];
+
+  const openMenu = (p, e) => {
+    e.stopPropagation();
+    if (menu?.id === p.id) { closeMenu(); return; }
+    const r = e.currentTarget.getBoundingClientRect();
+    const H = 268;                                  // menyuning taxminiy balandligi
+    const right = Math.max(10, window.innerWidth - r.right);
+    // Pastga sig'masa yuqoriga ag'daramiz
+    setMenu(r.bottom + H > window.innerHeight
+      ? { id: p.id, bottom: window.innerHeight - r.top + 6, right }
+      : { id: p.id, top: r.bottom + 6, right });
+    setCur(0);
+  };
+
+  // Tashqariga bosish, Escape va klaviatura — menyu ochiq bo'lgandagina
+  useEffect(() => {
+    if (!menu) return;
+    const p = projects.find((x) => x.id === menu.id);
+    if (!p) { closeMenu(); return; }
+    const items = itemsFor(p);
+    const rows = items.map((it, i) => (it.div || it.soon ? null : i)).filter((i) => i !== null);
+
+    const onDown = (e) => { if (!e.target.closest(".pmenu")) closeMenu(); };
+    const onKey = (e) => {
+      if (e.key === "Escape") { e.preventDefault(); closeMenu(); return; }
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        const at = rows.indexOf(cur);
+        const next = e.key === "ArrowDown"
+          ? rows[(at + 1) % rows.length]
+          : rows[(at - 1 + rows.length) % rows.length];
+        setCur(next);
+        return;
+      }
+      if (e.key === "Enter") {
+        e.preventDefault();
+        const it = items[cur];
+        if (it?.run) { closeMenu(); it.run(); }
+        return;
+      }
+      const hit = items.find((it) => it.k && !it.soon && it.k === e.key.toUpperCase());
+      if (hit) { e.preventDefault(); closeMenu(); hit.run(); }
+    };
+
+    document.addEventListener("mousedown", onDown);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [menu, cur, projects]);
 
   return html`
     <div class="left">
@@ -648,12 +721,13 @@ function Projects({ projects, activeId, onPick, onNew, onCopy, onRecovery, copie
 
               ${projects.map((p) => html`
                 <div key=${p.id}>
-                  <div class=${"prow" + (p.id === activeId ? " on" : "") + (p.pending ? " pending" : "")}
+                  <div class=${"prow" + (p.id === activeId ? " on" : "") + (p.pending ? " pending" : "")
+                                 + (menu?.id === p.id ? " menuopen" : "")}
                        onClick=${() => { if (!p.pending && editing !== p.id) onPick(p.id); }}>
                     <div class="av">${String(p.name ?? "?").slice(0, 1).toUpperCase()}</div>
                     <div class="nm">
                       ${editing === p.id
-                        ? html`<input class="rename" value=${draft} autoFocus
+                        ? html`<input class="rn" value=${draft} autoFocus
                                  onClick=${(e) => e.stopPropagation()}
                                  onInput=${(e) => setDraft(e.target.value)}
                                  onBlur=${() => commitRename(p)}
@@ -675,33 +749,46 @@ function Projects({ projects, activeId, onPick, onNew, onCopy, onRecovery, copie
                                   : null}
                               </div>`}`}
                     </div>
+                    ${isPinned(p.id) && !p.pending
+                      ? html`<span class="pin" title="Pinned"><${Icon} n="pin" /></span>`
+                      : null}
                     ${editing === p.id || p.pending ? null : html`
-                      <button class=${"copy" + (copiedId === p.id ? " done" : "")}
-                              title="Copy connect phrase"
-                              onClick=${(e) => { e.stopPropagation(); onCopy(p); }}>
-                        <${Icon} n=${copiedId === p.id ? "check" : "copy"} />
-                      </button>
-                      <button class=${"more" + (menuFor === p.id ? " on" : "")}
-                              title="Project actions"
-                              onClick=${(e) => {
-                                e.stopPropagation();
-                                setMenuFor(menuFor === p.id ? null : p.id);
-                              }}>⋯</button>`}
+                      <button class=${"more" + (menu?.id === p.id ? " on" : "")
+                                      + (copiedId === p.id ? " done" : "")}
+                              title="Project actions" aria-haspopup="menu"
+                              onClick=${(e) => openMenu(p, e)}>
+                        <${Icon} n=${copiedId === p.id ? "check" : "more"} />
+                      </button>`}
                   </div>
 
-                  ${menuFor === p.id ? html`
-                    <div class="rowmenu">
-                      <button onClick=${() => startRename(p)}>Rename</button>
-                      <button onClick=${() => { setMenuFor(null); onArchive(p); }}>
-                        Archive — hide from the list
-                      </button>
-                      <div class="div"></div>
-                      <button class="danger" onClick=${() => { setMenuFor(null); onDelete(p); }}>
-                        Delete permanently
-                      </button>
-                    </div>` : null}
                 </div>`)}
             </div>`}
+
+      ${menu && projects.find((x) => x.id === menu.id) ? (() => {
+        const p = projects.find((x) => x.id === menu.id);
+        const items = itemsFor(p);
+        return html`
+          <div class="pmenu" style=${{
+            top: menu.top != null ? menu.top + "px" : undefined,
+            bottom: menu.bottom != null ? menu.bottom + "px" : undefined,
+            right: menu.right + "px",
+          }}>
+            <div class="mhead">${p.name}</div>
+            ${items.map((it, i) => it.div
+              ? html`<div class="mdiv" key=${"d" + i}></div>`
+              : html`
+                <button key=${it.k}
+                        class=${"mi" + (it.danger ? " danger" : "") + (it.soon ? " soon" : "")
+                               + (cur === i && !it.soon ? " cur" : "")}
+                        disabled=${!!it.soon}
+                        onMouseEnter=${() => { if (!it.soon) setCur(i); }}
+                        onClick=${() => { if (it.run) { closeMenu(); it.run(); } }}>
+                  <${Icon} n=${it.icon} />
+                  <span class="lbl">${it.label}</span>
+                  <span class="k">${it.soon ? "Soon" : it.k}</span>
+                </button>`)}
+          </div>`;
+      })() : null}
 
       ${activeId ? html`
         <div class="sep"></div>
@@ -1052,6 +1139,13 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [deleting, setDeleting] = useState(null);
   const [treeLoading, setTreeLoading] = useState(false);
+  /* Pin — shaxsiy ko'rinish sozlamasi, loyiha ma'lumoti emas. Shuning uchun
+     `projects.settings` ga emas, brauzerga yoziladi: bir foydalanuvchining
+     tartibi boshqa a'zolarning ro'yxatini o'zgartirib yubormasin. */
+  const [pinned, setPinned] = useState(() => {
+    try { return new Set(JSON.parse(localStorage.getItem("cm_pinned") ?? "[]")); }
+    catch { return new Set(); }
+  });
   const [hideDone, setHideDone] = useState(() => {
     try { return localStorage.getItem("cm_hide_done") === "1"; } catch { return false; }
   });
@@ -1065,6 +1159,17 @@ function App() {
   };
 
   const say = (m) => { setToast(m); setTimeout(() => setToast(null), 2600); };
+
+  const isPinned = useCallback((id) => pinned.has(id), [pinned]);
+
+  const togglePin = useCallback((p) => {
+    setPinned((cur) => {
+      const next = new Set(cur);
+      next.has(p.id) ? next.delete(p.id) : next.add(p.id);
+      try { localStorage.setItem("cm_pinned", JSON.stringify([...next])); } catch { /* ignore */ }
+      return next;
+    });
+  }, []);
 
   const toggleHideDone = useCallback(() => {
     setHideDone((v) => {
@@ -1215,6 +1320,11 @@ function App() {
 
   // DIQQAT: ulash iborasi o'zbekcha qoladi — uni skill "Chat Manager: ula →"
   // shakli bo'yicha taniydi. Ingliz tiliga o'girilsa mos kelmay qoladi.
+  const copyProjectLink = useCallback((p) => {
+    const base = location.origin + location.pathname;
+    copyText(`${base}?project=${p.id}`, p.id, "Project link copied");
+  }, [copyText]);
+
   const copyPhrase = useCallback((p) =>
     copyText(
       `Chat Manager: ula → ${p.name} (${p.id})`,
@@ -1244,6 +1354,24 @@ function App() {
   useEffect(() => {
     if (hideDone && selected && selected.status === "done") setSelected(null);
   }, [hideDone, selected]);
+
+  // ?project=<uuid> bilan ochilsa o'sha loyiha tanlanadi. Havolani ulashish
+  // uchun ham, brauzer tarixi uchun ham shu bitta manba yetadi.
+  useEffect(() => {
+    if (!projects.length) return;
+    let want = null;
+    try { want = new URLSearchParams(location.search).get("project"); } catch { /* file:// */ }
+    if (want && projects.some((p) => p.id === want)) setActiveId(want);
+  }, [projects.length]);
+
+  useEffect(() => {
+    if (!activeId || demo) return;
+    try {
+      const u = new URL(location.href);
+      u.searchParams.set("project", activeId);
+      history.replaceState(null, "", u);
+    } catch { /* file:// da ishlamaydi, muhim emas */ }
+  }, [activeId, demo]);
 
   useEffect(() => { if (sb) loadProjects(sb); }, [sb, loadProjects]);
   useEffect(() => { if (sb && activeId) loadTree(sb, activeId); }, [sb, activeId, loadTree]);
@@ -1293,6 +1421,8 @@ function App() {
 
   const counts = nodes.reduce((a, n) => { a[n.status] = (a[n.status] ?? 0) + 1; return a; }, {});
   const activeName = projects.find((p) => p.id === activeId)?.name ?? "";
+  const ordered = [...projects].sort(
+    (a, b) => (pinned.has(b.id) ? 1 : 0) - (pinned.has(a.id) ? 1 : 0));
   const vis = visibleTree(nodes, hideDone);
   const hidden = nodes.length - vis.length;
   const shown = withProjectRoot(vis, activeName, counts);
@@ -1328,14 +1458,15 @@ function App() {
       </div>
 
       <div class="body" data-left=${leftOpen ? "on" : "off"} data-right=${rightOpen ? "on" : "off"}>
-        <${Projects} projects=${projects} activeId=${activeId} chats=${chats}
+        <${Projects} projects=${ordered} activeId=${activeId} chats=${chats}
                      copiedId=${copiedId} loading=${loading}
                      open=${leftOpen} onToggle=${setLeftOpen}
                      onPick=${(id) => { setActiveId(id); setSelected(null); }}
                      onNew=${newProject}
                      onCopy=${copyPhrase} onRecovery=${copyRecovery}
                      demo=${demo} onRename=${renameProject} onArchive=${archiveProject}
-                     onDelete=${(p) => setDeleting(p)} />
+                     onDelete=${(p) => setDeleting(p)} onCopyLink=${copyProjectLink}
+                     onTogglePin=${togglePin} isPinned=${isPinned} />
         <${Canvas} key=${activeId + ":" + (hideDone ? "1" : "0") + ":" + activeName}
                    nodes=${shown} selected=${selected} onSelect=${setSelected}
                    freshIds=${freshIds.current} hiddenCount=${hidden} />
