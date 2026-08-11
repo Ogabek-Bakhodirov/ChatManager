@@ -565,9 +565,21 @@ function Canvas({ nodes, selected, onSelect, freshIds, hiddenCount = 0 }) {
 }
 
 function Projects({ projects, activeId, onPick, onNew, onCopy, onRecovery, copiedId,
-                    chats, open, onToggle, loading }) {
+                    chats, open, onToggle, loading,
+                    onRename, onArchive, onDelete, demo }) {
   const linked = chats.filter((c) => c.status === "linked").length;
   const pending = chats.length - linked;
+
+  const [menuFor, setMenuFor] = useState(null);   // menyu ochilgan loyiha id
+  const [editing, setEditing] = useState(null);   // nomi tahrirlanayotgan id
+  const [draft, setDraft] = useState("");
+
+  const startRename = (p) => { setMenuFor(null); setEditing(p.id); setDraft(p.name ?? ""); };
+  const commitRename = (p) => {
+    const name = draft.trim();
+    setEditing(null);
+    if (name && name !== p.name) onRename(p, name);
+  };
 
   return html`
     <div class="left">
@@ -615,23 +627,57 @@ function Projects({ projects, activeId, onPick, onNew, onCopy, onRecovery, copie
           : html`
             <div class="plist">
               ${projects.map((p) => html`
-                <div key=${p.id} class=${"prow" + (p.id === activeId ? " on" : "")}
-                     onClick=${() => onPick(p.id)}>
-                  <div class="av">${String(p.name ?? "?").slice(0, 1).toUpperCase()}</div>
-                  <div class="nm">
-                    <div class="t" title=${p.name ?? ""}>${p.name}</div>
-                    <div class="ct">
-                      ${p.nodes ?? 0} nodes
-                      ${p.id === activeId && chats.length
-                        ? html`<i></i>${linked} chat${linked === 1 ? "" : "s"}`
-                        : null}
+                <div key=${p.id}>
+                  <div class=${"prow" + (p.id === activeId ? " on" : "")}
+                       onClick=${() => editing === p.id || onPick(p.id)}>
+                    <div class="av">${String(p.name ?? "?").slice(0, 1).toUpperCase()}</div>
+                    <div class="nm">
+                      ${editing === p.id
+                        ? html`<input class="rename" value=${draft} autoFocus
+                                 onClick=${(e) => e.stopPropagation()}
+                                 onInput=${(e) => setDraft(e.target.value)}
+                                 onBlur=${() => commitRename(p)}
+                                 onKeyDown=${(e) => {
+                                   if (e.key === "Enter") { e.preventDefault(); commitRename(p); }
+                                   if (e.key === "Escape") { e.preventDefault(); setEditing(null); }
+                                 }} />`
+                        : html`
+                          <div class="t" title=${p.name ?? ""}
+                               onDoubleClick=${(e) => { e.stopPropagation(); startRename(p); }}>
+                            ${p.name}
+                          </div>
+                          <div class="ct">
+                            ${p.nodes ?? 0} nodes
+                            ${p.id === activeId && chats.length
+                              ? html`<i></i>${linked} chat${linked === 1 ? "" : "s"}`
+                              : null}
+                          </div>`}
                     </div>
+                    ${editing === p.id ? null : html`
+                      <button class=${"copy" + (copiedId === p.id ? " done" : "")}
+                              title="Copy connect phrase"
+                              onClick=${(e) => { e.stopPropagation(); onCopy(p); }}>
+                        <${Icon} n=${copiedId === p.id ? "check" : "copy"} />
+                      </button>
+                      <button class=${"more" + (menuFor === p.id ? " on" : "")}
+                              title="Project actions"
+                              onClick=${(e) => {
+                                e.stopPropagation();
+                                setMenuFor(menuFor === p.id ? null : p.id);
+                              }}>⋯</button>`}
                   </div>
-                  <button class=${"copy" + (copiedId === p.id ? " done" : "")}
-                          title="Copy connect phrase"
-                          onClick=${(e) => { e.stopPropagation(); onCopy(p); }}>
-                    <${Icon} n=${copiedId === p.id ? "check" : "copy"} />
-                  </button>
+
+                  ${menuFor === p.id ? html`
+                    <div class="rowmenu">
+                      <button onClick=${() => startRename(p)}>Rename</button>
+                      <button onClick=${() => { setMenuFor(null); onArchive(p); }}>
+                        Archive — hide from the list
+                      </button>
+                      <div class="div"></div>
+                      <button class="danger" onClick=${() => { setMenuFor(null); onDelete(p); }}>
+                        Delete permanently
+                      </button>
+                    </div>` : null}
                 </div>`)}
             </div>`}
 
@@ -933,6 +979,38 @@ function Gate({ onReady, initial, theme, onTheme }) {
     </div>`;
 }
 
+/* O'chirish qaytarib bo'lmaydi: `projects` dan cascade bilan tugunlar,
+   chat sessiyalari va tokenlar ham o'chadi. Shuning uchun nomni yozib
+   tasdiqlash talab qilinadi — tasodifiy bosishdan himoya. */
+function DeleteDialog({ project, onCancel, onConfirm }) {
+  const [typed, setTyped] = useState("");
+  const [busy, setBusy] = useState(false);
+  const match = typed.trim() === (project.name ?? "").trim();
+
+  return html`
+    <div class="modal" onClick=${onCancel}>
+      <div class="box" onClick=${(e) => e.stopPropagation()}>
+        <h2>Delete "${project.name}"?</h2>
+        <div class="warn">
+          This removes <b>${project.nodes ?? 0} nodes</b>, every connected chat session and
+          every connect token for this project. It cannot be undone — there is no backup.
+        </div>
+        <p>If you only want it out of the way, close this and choose <b>Archive</b> instead.
+           Archived projects keep all their data.</p>
+        <label>Type <b>${project.name}</b> to confirm</label>
+        <input value=${typed} autoFocus onInput=${(e) => setTyped(e.target.value)}
+               onKeyDown=${(e) => { if (e.key === "Enter" && match && !busy) { setBusy(true); onConfirm(); } }} />
+        <div class="row">
+          <button onClick=${onCancel}>Cancel</button>
+          <button class="danger" disabled=${!match || busy}
+                  onClick=${() => { setBusy(true); onConfirm(); }}>
+            ${busy ? "Deleting…" : "Delete permanently"}
+          </button>
+        </div>
+      </div>
+    </div>`;
+}
+
 function App() {
   const saved = (() => { try { return JSON.parse(localStorage.getItem(LS)); } catch { return null; } })();
   const [sb, setSb] = useState(undefined);       // undefined = hali kirilmagan
@@ -950,6 +1028,7 @@ function App() {
   const [leftOpen, setLeftOpen] = useState(true);
   const [rightOpen, setRightOpen] = useState(true);
   const [loading, setLoading] = useState(false);
+  const [deleting, setDeleting] = useState(null);
   const [hideDone, setHideDone] = useState(() => {
     try { return localStorage.getItem("cm_hide_done") === "1"; } catch { return false; }
   });
@@ -1033,6 +1112,44 @@ function App() {
     setActiveId(data.id);
     say(`"${data.name}" created`);
   }, [sb, loadProjects]);
+
+  const guard = () => {
+    if (demo) { say("Not available in demo mode"); return false; }
+    if (!sb) return false;
+    return true;
+  };
+
+  const renameProject = useCallback(async (p, name) => {
+    if (!guard()) return;
+    const { error } = await sb.from("projects").update({ name }).eq("id", p.id);
+    if (error) { say("Rename failed: " + error.message); return; }
+    setProjects((cur) => cur.map((x) => (x.id === p.id ? { ...x, name } : x)));
+    say(`Renamed to "${name}"`);
+  }, [sb, demo]);
+
+  // Arxivlash — yumshoq o'chirish. `archived_at` to'lganda loyiha ro'yxatdan
+  // chiqadi, lekin ma'lumot joyida qoladi va SQL bilan qaytarish mumkin.
+  const archiveProject = useCallback(async (p) => {
+    if (!guard()) return;
+    const { error } = await sb.from("projects")
+      .update({ archived_at: new Date().toISOString() }).eq("id", p.id);
+    if (error) { say("Archive failed: " + error.message); return; }
+    const rest = projects.filter((x) => x.id !== p.id);
+    setProjects(rest);
+    if (activeId === p.id) { setActiveId(rest[0]?.id ?? null); setSelected(null); }
+    say(`"${p.name}" archived — data is kept`);
+  }, [sb, demo, projects, activeId]);
+
+  const deleteProject = useCallback(async (p) => {
+    if (!guard()) { setDeleting(null); return; }
+    const { error } = await sb.from("projects").delete().eq("id", p.id);
+    if (error) { say("Delete failed: " + error.message); setDeleting(null); return; }
+    const rest = projects.filter((x) => x.id !== p.id);
+    setProjects(rest);
+    if (activeId === p.id) { setActiveId(rest[0]?.id ?? null); setSelected(null); }
+    setDeleting(null);
+    say(`"${p.name}" deleted`);
+  }, [sb, demo, projects, activeId]);
 
   const copyText = useCallback(async (textToCopy, markId, toastMsg) => {
     try {
@@ -1167,7 +1284,9 @@ function App() {
                      open=${leftOpen} onToggle=${setLeftOpen}
                      onPick=${(id) => { setActiveId(id); setSelected(null); }}
                      onNew=${demo ? () => say("Creating projects is disabled in demo mode") : newProject}
-                     onCopy=${copyPhrase} onRecovery=${copyRecovery} />
+                     onCopy=${copyPhrase} onRecovery=${copyRecovery}
+                     demo=${demo} onRename=${renameProject} onArchive=${archiveProject}
+                     onDelete=${(p) => setDeleting(p)} />
         <${Canvas} key=${activeId + ":" + (hideDone ? "1" : "0") + ":" + activeName}
                    nodes=${shown} selected=${selected} onSelect=${setSelected}
                    freshIds=${freshIds.current} hiddenCount=${hidden} />
@@ -1176,6 +1295,11 @@ function App() {
                  sb=${sb} demo=${demo} onEnableRaw=${enableStoreRaw}
                  storeRaw=${!!projects.find((p) => p.id === activeId)?.settings?.store_raw} />
       </div>
+
+      ${deleting
+        ? html`<${DeleteDialog} project=${deleting} onCancel=${() => setDeleting(null)}
+                 onConfirm=${() => deleteProject(deleting)} />`
+        : null}
 
       <div class=${"toast" + (toast ? " show" : "")}>
         <span class="ok"><${Icon} n="check" /></span>${toast ?? ""}
