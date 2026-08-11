@@ -18,17 +18,19 @@ const THEME_KEY = "cm_theme";
 /* ====================================================================== */
 
 // Foydalanuvchi "nimadir tushib qolgan" deb o'ylaganda chatga qo'yadigan matn.
-// DIQQAT: interfeys ingliz tilida, lekin BU MATN o'zbekcha qoladi — u UI emas,
-// modelga yuboriladigan yuk. Tarjima qilinsa extraction sifati o'zgaradi.
-const RECOVERY_PROMPT = `Chat Manager: to'liq tekshiruv
+// Bu matn UI emas — foydalanuvchi uni chatga YOPISHTIRADI, ya'ni modelga
+// yuboriladigan yuk. Mahsulot ingliz bozori uchun bo'lgani sababli u ham
+// inglizcha: model uni o'z tilida aniqroq bajaradi va foydalanuvchi nima
+// yopishtirayotganini o'qiy oladi.
+const RECOVERY_PROMPT = `Loosend: full recheck
 
-1. chat_manager_tree ni chaqir — daraxtda hozir nima borligini ko'r.
-2. Shu suhbatni BOSHIDAN oxirigacha qayta ko'rib chiq.
-3. Daraxtda yo'q bo'lgan har bir ishni — bajarilgan, rejalashtirilgan, to'silgan
-   yoki bekor qilingan — bitta chat_manager_sync ga jamlab yubor.
-4. Statusi o'zgargan tugunlarni ham kirit.
+1. Call chat_manager_tree — see what the tree currently holds.
+2. Re-read this conversation from the VERY BEGINNING to now.
+3. Every piece of work that is missing from the tree — done, planned, blocked
+   or cancelled — send it in a single chat_manager_sync call.
+4. Include nodes whose status has changed.
 
-Menga faqat qisqa hisobot ber: nechta yangi qo'shildi, nechta status o'zgardi.`;
+Then give me a short report only: how many were added, how many changed status.`;
 
 const NW = 250, GAP_X = 90, GAP_Y = 20;
 
@@ -341,15 +343,15 @@ const DEMO = [
 const DEMO_CONTEXT = {
   "10": [
     { out_id: "m1", out_role: "user", out_seq: 41, out_is_anchor: false,
-      out_content: "Parser resume paytida yiqilyapti. Nega?" },
+      out_content: "The parser crashes on resume. Why?" },
     { out_id: "m2", out_role: "assistant", out_seq: 42, out_is_anchor: true,
       out_content: "It throws when the session resumes mid-stream — the SDK emits no resume event, so the cursor has nothing to re-anchor to. We can either fake the anchor from the last seq we saw, or wait." },
     { out_id: "m3", out_role: "user", out_seq: 43, out_is_anchor: false,
-      out_content: "Fake qilsak keyin olib tashlash kerak bo'ladi. Kutamiz." },
+      out_content: "If we fake it we'll have to rip it out later. Let's wait." },
   ],
   "4": [
     { out_id: "m8", out_role: "user", out_seq: 12, out_is_anchor: false,
-      out_content: "Ikki chat bir vaqtda sync qilsa dublikat chiqyapti." },
+      out_content: "Two chats syncing at once produce duplicates." },
     { out_id: "m9", out_role: "assistant", out_seq: 13, out_is_anchor: true,
       out_content: "apply_ops applies operations atomically, behind an advisory lock, so two chats can never interleave." },
   ],

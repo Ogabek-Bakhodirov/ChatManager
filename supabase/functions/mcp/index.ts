@@ -13,7 +13,7 @@
 // ============================================================================
 
 const PROTOCOL_VERSION = "2025-06-18";
-const SERVER_VERSION = "0.6.0";
+const SERVER_VERSION = "0.12.0";
 
 interface RpcReq {
   jsonrpc: string;
@@ -45,35 +45,35 @@ const fail = (s: string) => ({ ...text(s), isError: true });
 /* ------------------------------------------------------------------ tools */
 
 const CHAT_REF_DESC =
-  "Shu suhbatning identifikatori (masalan chat_7f3a). U `chat_manager_link` " +
-  "javobida berilgan — suhbat tarixidan topib, HAR SAFAR shu yerga qo'y. " +
-  "Bu qaysi chat qaysi loyihaga tegishli ekanini aniqlashning yagona ishonchli yo'li.";
+  "This conversation's identifier (e.g. chat_7f3a). It was returned by " +
+  "`chat_manager_link` — find it in the conversation history and pass it EVERY " +
+  "time. It is the only reliable way to tell which chat belongs to which project.";
 
 const TOOLS = [
   {
     name: "chat_manager_sync",
     description:
-      "Chat Manager'dagi task daraxtini shu suhbatdagi so'nggi ishlar bilan yangilaydi.\n\n" +
-      "`text` ga suhbatning oxirgi sinxronlashdan keyingi qismini ASL holida ko'chir — " +
-      "kim nima dedi, qaysi task bajarildi, qaysi yangi ish paydo bo'ldi. Umumlashtirma: " +
-      "'ishlar qilindi' emas, '0003 patch yozildi va test 21/21 o'tdi'. Kod bloklarini tashla.\n\n" +
-      "CHAQIR: biror ish bajarilganda ('bajardim', 'tayyor', 'ishladi'), yangi task yoki " +
-      "bosqich paydo bo'lganda, roadmap tuzilganda yoki o'zgarganda, ish bekor qilinganda. " +
-      "Javobni yakunlashdan OLDIN chaqir. Bir javobda bir marta yetarli.\n\n" +
-      "CHAQIRMA: oddiy savol-javob, tushuntirish, variantlarni muhokama qilishda.\n\n" +
-      "QAMROV: agar oxirgi syncdan beri vaqt o'tgan bo'lsa (javobdagi " +
-      "`minutes_since_sync` ni ko'r), `text` ga o'sha butun davrni sol — " +
-      "faqat oxirgi javobni emas.",
+      "Updates the task tree with the latest work from this conversation.\n\n" +
+      "Put the part of the conversation since the last sync into `text`, close to " +
+      "VERBATIM — who said what, which task finished, what new work appeared. Do not " +
+      "summarize: not 'some work was done' but 'wrote patch 0003, tests 21/21 passed'. " +
+      "Strip code blocks.\n\n" +
+      "CALL IT when work gets finished ('done', 'it works', 'shipped'), when a new task " +
+      "or phase appears, when a roadmap is written or changes, or when work is dropped. " +
+      "Call it BEFORE you finish your reply. Once per reply is enough.\n\n" +
+      "DO NOT CALL IT for plain Q&A, explanations, or weighing options.\n\n" +
+      "COVERAGE: if time has passed since the last sync (check `minutes_since_sync` in " +
+      "the response), put that WHOLE period into `text` — not just your last reply.",
     inputSchema: {
       type: "object",
       properties: {
-        text: { type: "string", description: "Suhbatning yangi qismi, asl matnga yaqin." },
+        text: { type: "string", description: "The new part of the conversation, close to verbatim." },
         chat_ref: { type: "string", description: CHAT_REF_DESC },
         label: {
           type: "string",
           description:
-            "Shu suhbatning qisqa nomi (masalan 'Backend'). chat_ref yo'qolgan bo'lsa " +
-            "zaxira aniqlash yo'li sifatida ishlatiladi.",
+            "A short name for this conversation (e.g. 'Backend'). Used as a fallback " +
+            "identifier when chat_ref is lost.",
         },
       },
       required: ["text"],
@@ -82,45 +82,147 @@ const TOOLS = [
   {
     name: "chat_manager_link",
     description:
-      "Shu suhbatni Chat Manager loyihasiga ulaydi. Suhbatda bir marta chaqiriladi. " +
-      "Ulanmaguncha chat_manager_sync ishlamaydi.\n\n" +
-      "Foydalanuvchi xabarida `Chat Manager: ula → <nom> (<uuid>)` ko'rinishidagi " +
-      "ULASH IBORASI bo'lsa — qavs ichidagi uuid ni `project_id` ga aynan ko'chir " +
-      "va hech narsa so'rama.\n\n" +
-      "`project_id` ni bilmasang — avval `chat_manager_projects` ni chaqir. " +
-      "`label` ga suhbat mavzusini ber: bir loyiha ustida bir nechta chat ishlaydi va " +
-      "foydalanuvchi daraxtda qaysi shox qaysi chatdan kelganini shu nom orqali ko'radi.\n\n" +
-      "Javobda qaytgan `chat_ref` ni ESLAB QOL — keyingi barcha chaqiruvlarda kerak.",
+      "Connects this conversation to a project. Called once per conversation. " +
+      "chat_manager_sync does not work until this succeeds.\n\n" +
+      "If the user's message contains a CONNECT PHRASE shaped like " +
+      "`Loosend: connect → <name> (<uuid>)`, copy the uuid in parentheses into " +
+      "`project_id` exactly and ask nothing.\n\n" +
+      "If you do not know the `project_id`, call `chat_manager_projects` first. " +
+      "Give `label` the topic of this conversation: several chats can work on one " +
+      "project, and this name is how the user sees which branch came from which chat.\n\n" +
+      "REMEMBER the `chat_ref` in the response — every later call needs it.",
     inputSchema: {
       type: "object",
       properties: {
-        project_id: { type: "string", description: "Loyiha ID (chat_manager_projects dan)." },
-        label: { type: "string", description: "Suhbat nomi: 'Backend', 'Deploy', 'Marketing'." },
-        chat_ref: { type: "string", description: "Agar bu suhbat ilgari ulangan bo'lsa." },
+        project_id: { type: "string", description: "Project id (from chat_manager_projects)." },
+        label: { type: "string", description: "Conversation name: 'Backend', 'Deploy', 'Marketing'." },
+        chat_ref: { type: "string", description: "If this conversation was connected before." },
       },
     },
   },
   {
     name: "chat_manager_projects",
     description:
-      "Mavjud Chat Manager loyihalari ro'yxati: ID, nom, tugunlar soni, ochiq tasklar soni. " +
-      "Ulashdan oldin yoki foydalanuvchi 'qaysi loyihalar bor' deb so'raganda chaqir.",
+      "Lists the available projects: id, name, node count, open task count. " +
+      "Call it before connecting, or when the user asks which projects exist.",
     inputSchema: { type: "object", properties: {} },
   },
   {
     name: "chat_manager_tree",
     description:
-      "Loyihaning hozirgi task daraxtini qaytaradi. Suhbat boshida yoki foydalanuvchi " +
-      "'qayerda qoldik', 'nima qoldi', 'daraxtni ko'rsat' deganda chaqir.",
+      "Returns the project's task tree. Call it at the start of a conversation, or " +
+      "when the user asks 'where did we leave off', 'what's left', 'show the tree'.\n\n" +
+      "Each line looks like `#42 [status] title`. `#42` is that node's number. When the " +
+      "user says 'let's do #42', find that numbered line in the tree and do exactly " +
+      "that piece of work.\n\n" +
+      "The tree is stored in ENGLISH. Reply to the user in the user's own language.",
     inputSchema: {
       type: "object",
       properties: {
         chat_ref: { type: "string", description: CHAT_REF_DESC },
-        label: { type: "string", description: "chat_ref yo'q bo'lsa zaxira." },
+        label: { type: "string", description: "Fallback when chat_ref is unavailable." },
+        scope: {
+          type: "string",
+          enum: ["open", "recent", "all"],
+          description:
+            "What to show. `open` — unfinished work only (USE THIS AT THE START OF A " +
+            "CONVERSATION, it saves context). `recent` — changed in the last 7 days. " +
+            "`all` — everything, only when the user asks for the full list. " +
+            "Default: open.",
+        },
+      },
+    },
+  },
+  {
+    name: "chat_manager_organize",
+    description:
+      "Reorganizes the tree: moves a node under a different parent, or merges two " +
+      "duplicate nodes. Call it when the user says 'move #118 under #117' or " +
+      "'these two are the same task, merge them'. Take the numbers from the tree; " +
+      "never invent one. On merge, the absorbed node's children and history are " +
+      "preserved — nothing is lost.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        chat_ref: { type: "string", description: CHAT_REF_DESC },
+        label: { type: "string", description: "Fallback when chat_ref is unavailable." },
+        moves: {
+          type: "array",
+          description: "Moves. Leave parent empty to move the node to the root.",
+          items: {
+            type: "object",
+            properties: {
+              node: { type: "string", description: "Node to move: '#118'" },
+              parent: { type: "string", description: "New parent: '#117'. Leave empty for root." },
+            },
+            required: ["node"],
+          },
+        },
+        merges: {
+          type: "array",
+          description: "Merges: absorb is folded into keep.",
+          items: {
+            type: "object",
+            properties: {
+              keep: { type: "string", description: "Node that survives: '#116'" },
+              absorb: { type: "string", description: "Node folded in: '#122'" },
+            },
+            required: ["keep", "absorb"],
+          },
+        },
       },
     },
   },
 ];
+
+/* ----------------------------------------------------------- pulse -------
+   Workspace pulsi — dinamik eslatma uchun (audit 2-qatlam). Qisqa timeout:
+   pulsni ololmasak jim davom etamiz, tool ro'yxatini kechiktirish mumkin emas. */
+async function fetchPulse(token: string): Promise<
+  { linked: number; stale_minutes: number | null; error_sessions: number } | null
+> {
+  const INGEST = Deno.env.get("INGEST_URL");
+  if (!INGEST || !token) return null;
+  try {
+    const r = await fetch(INGEST, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+      body: JSON.stringify({ action: "pulse" }),
+      signal: AbortSignal.timeout(2500),
+    });
+    if (!r.ok) return null;
+    const b = await r.json();
+    return {
+      linked: Number(b.linked ?? 0),
+      stale_minutes: b.stale_minutes === null ? null : Number(b.stale_minutes),
+      error_sessions: Number(b.error_sessions ?? 0),
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** Pulsdan eslatma matni. Shovqin bo'lmasin: faqat 30+ daqiqa jimlik yoki
+    xato bo'lgandagina qaytadi. */
+function pulseNudge(
+  p: { linked: number; stale_minutes: number | null; error_sessions: number } | null,
+): string {
+  if (!p || p.linked === 0) return "";
+  const parts: string[] = [];
+  if (p.error_sessions > 0) {
+    parts.push(
+      `⚠️ In ${p.error_sessions} chat(s) the LAST sync ended with an error — ` +
+      `that period's work is missing from the tree and needs to be resent.`,
+    );
+  }
+  if (p.stale_minutes !== null && p.stale_minutes >= 30) {
+    parts.push(
+      `⏱ Last sync was ${p.stale_minutes} minutes ago. If work happened since then, ` +
+      `close the whole period with one sync before you finish your reply.`,
+    );
+  }
+  return parts.length ? parts.join("\n") + "\n\n" : "";
+}
 
 /* ------------------------------------------------------------------ main  */
 
@@ -134,6 +236,43 @@ Deno.serve(async (req: Request) => {
   const token = /^cm_(live|ws)_/.test(fromHeader) ? fromHeader : fromPath;
 
   if (req.method === "GET") {
+    // Streamable HTTP: mijoz server-yo'nalishli oqim uchun GET + SSE ochadi.
+    // Biz undan BITTA maqsadda foydalanamiz: jimlik/xato bo'lsa
+    // `tools/list_changed` yuboramiz — mijoz tool ro'yxatini qayta so'raydi
+    // va dinamik tavsifdagi eslatmani oladi. Oddiy GET (curl) eski JSON oladi.
+    if ((req.headers.get("accept") ?? "").includes("text/event-stream") && token) {
+      const enc = new TextEncoder();
+      const stream = new ReadableStream({
+        async start(controller) {
+          const send = (obj: unknown) =>
+            controller.enqueue(enc.encode(`event: message\ndata: ${JSON.stringify(obj)}\n\n`));
+          const ping = () => controller.enqueue(enc.encode(`: ping\n\n`));
+
+          ping();
+          const pulse = await fetchPulse(token);
+          if (pulse && (pulse.error_sessions > 0 ||
+              (pulse.stale_minutes !== null && pulse.stale_minutes >= 30))) {
+            send({ jsonrpc: "2.0", method: "notifications/tools/list_changed" });
+          }
+
+          // Edge funksiya wall-clock chegarasiga urilmasdan yopamiz; mijoz
+          // qayta ulanadi va keyingi tekshiruv o'sha paytda bo'ladi.
+          let alive = 0;
+          const t = setInterval(() => {
+            alive += 20;
+            if (alive >= 100) { clearInterval(t); try { controller.close(); } catch { /* yopiq */ } }
+            else ping();
+          }, 20000);
+        },
+      });
+      return new Response(stream, {
+        headers: {
+          "content-type": "text/event-stream",
+          "cache-control": "no-cache",
+          "access-control-allow-origin": "*",
+        },
+      });
+    }
     return jsonRes({ name: "chat-manager", version: SERVER_VERSION, transport: "streamable-http" });
   }
   if (req.method !== "POST") return err(null, -32600, "method_not_allowed");
@@ -150,25 +289,34 @@ Deno.serve(async (req: Request) => {
   if (rpc.method === "initialize") {
     return ok(id, {
       protocolVersion: PROTOCOL_VERSION,
-      capabilities: { tools: { listChanged: false } },
+      capabilities: { tools: { listChanged: true } },
       serverInfo: { name: "chat-manager", version: SERVER_VERSION },
       instructions:
-        "Chat Manager suhbatdagi tasklarni daraxt shaklida saqlaydi. Quyidagilar " +
-        "shu suhbat davomida amal qiladigan QAT'IY qoidalar.\n\n" +
-        "1. ULASH. Task, reja yoki roadmap mavzusi ochilganda: suhbatda " +
-        "`Chat Manager: ula → <nom> (<uuid>)` iborasi bo'lsa — o'sha uuid bilan " +
-        "`chat_manager_link` ni chaqir, so'ramasdan. Ibora bo'lmasa avval " +
-        "`chat_manager_tree` bilan tekshir. Javobdagi `chat_ref` ni ESLAB QOL.\n\n" +
-        "2. SYNC. Javobingni yakunlashdan OLDIN o'zingdan so'ra: shu javobda biror " +
-        "ish bajarildimi, rejalashtirildimi, to'sildimi yoki bekor qilindimi? " +
-        "Ha bo'lsa — `chat_manager_sync` ni chaqir. Shubha bo'lsa CHAQIR: ortiqcha " +
-        "sync zararsiz, tushib qolgan ish esa butunlay yo'qoladi.\n\n" +
-        "3. QAMROV — eng muhimi. Har `sync` javobida `minutes_since_sync` qaytadi. " +
-        "U 0 dan katta bo'lsa, `text` ga FAQAT oxirgi javobni emas, o'sha " +
-        "davrdagi BARCHA ishni sol. Chastota emas, qamrov muhim: kamdan-kam " +
-        "sync qilsang ham, har biri butun tanaffusni yopsa hech narsa yo'qolmaydi.\n\n" +
-        "4. Foydalanuvchidan ruxsat SO'RAMA va sync qilganingni har safar " +
-        "e'lon qilma — bu tizimning ma'nosi ko'rinmas ishlashda.",
+        "Loosend keeps the tasks discussed in this conversation as a live tree. " +
+        "The following are STRICT rules for this whole conversation.\n\n" +
+        "1. CONNECT. When tasks, plans or a roadmap come up: if the conversation " +
+        "contains a phrase shaped like `Loosend: connect → <name> (<uuid>)`, call " +
+        "`chat_manager_link` with that uuid, without asking. If there is no such " +
+        "phrase, check with `chat_manager_tree` first. REMEMBER the `chat_ref` from " +
+        "the response.\n\n" +
+        "NODE NUMBERS. Every tree line looks like `#42 [status] title`. `#42` is that " +
+        "piece of work's number. When the user says 'let's do #42', find that number " +
+        "in the tree and do exactly that work; never invent a number. The tree is " +
+        "stored in English — reply to the user in the user's own language.\n\n" +
+        "2. SYNC. Before you finish a reply, ask yourself: did this reply finish, " +
+        "plan, block or cancel any work? If yes, call `chat_manager_sync`. When in " +
+        "doubt, CALL IT: an extra sync is harmless, while dropped work is gone for " +
+        "good.\n\n" +
+        "3. COVERAGE — the most important rule. Every `sync` response returns " +
+        "`minutes_since_sync`. If it is above 0, put ALL the work from that period " +
+        "into `text`, not just your last reply. Coverage matters more than frequency: " +
+        "syncing rarely is fine as long as each sync closes the whole gap.\n\n" +
+        "4. Do NOT ask the user for permission, and do not announce every sync — the " +
+        "whole point of this system is that it works invisibly.\n\n" +
+        "5. READ THE RESPONSE — this is mandatory. If you see a `⚠️` marker or a " +
+        "'NOT CAPTURED' list, resend those exact lines in a separate sync. " +
+        "'0 changes' is NOT success. If you see an error, do not hide it: tell the " +
+        "user in one sentence and try to fix it.",
     });
   }
 
@@ -176,20 +324,33 @@ Deno.serve(async (req: Request) => {
     return new Response(null, { status: 202, headers: { "access-control-allow-origin": "*" } });
   }
   if (rpc.method === "ping") return ok(id, {});
-  if (rpc.method === "tools/list") return ok(id, { tools: TOOLS });
+  if (rpc.method === "tools/list") {
+    // Dinamik tavsif (audit 2-qatlam): instructions sessiya boshida BIR marta
+    // o'qiladi, tool tavsiflari esa har navbatda kontekstda turadi. Jimlik
+    // yoki xato eslatmasini sync tavsifining BOSHIga qo'yamiz — model uni
+    // har javob oldidan ko'radi. Pulse olinmasa ro'yxat o'zgarishsiz qaytadi.
+    const nudge = pulseNudge(await fetchPulse(token));
+    if (!nudge) return ok(id, { tools: TOOLS });
+    const tools = TOOLS.map((t) =>
+      t.name === "chat_manager_sync"
+        ? { ...t, description: nudge + t.description }
+        : t
+    );
+    return ok(id, { tools });
+  }
   if (rpc.method !== "tools/call") return err(id, -32601, `unknown_method: ${rpc.method}`);
 
   /* ---------------------------------------------------------- tools/call */
 
   if (!/^cm_(live|ws)_/.test(token)) {
     return ok(id, fail(
-      "Token topilmadi. Connector manzilini `/mcp/cm_ws_...` ko'rinishida bering " +
-        "yoki `Authorization: Bearer cm_ws_...` headerini qo'shing.",
+      "No token found. Set the connector URL as `/mcp/cm_ws_...` or add an " +
+        "`Authorization: Bearer cm_ws_...` header.",
     ));
   }
 
   const INGEST = Deno.env.get("INGEST_URL");
-  if (!INGEST) return err(id, -32603, "INGEST_URL sozlanmagan");
+  if (!INGEST) return err(id, -32603, "INGEST_URL is not configured");
 
   const name = String(rpc.params?.name ?? "");
   const args = (rpc.params?.arguments ?? {}) as Record<string, unknown>;
@@ -215,7 +376,7 @@ Deno.serve(async (req: Request) => {
   };
 
   const refLine = (ref: unknown) =>
-    ref ? `\n\nchat_ref: ${ref} — keyingi chaqiruvlarda shuni yubor.` : "";
+    ref ? `\n\nchat_ref: ${ref} — pass this in every later call.` : "";
 
   // Tanaffus ogohlantirishi. Model o'zi vaqtni bilmaydi — server aytadi.
   // Tanaffus uzayganda ohang kuchayadi.
@@ -223,10 +384,10 @@ Deno.serve(async (req: Request) => {
     const m = Number(min);
     if (!Number.isFinite(m) || m < 15) return "";
     if (m < 45) {
-      return `\n\n⏱ Oxirgi sync ${m} daqiqa oldin edi — keyingi sync o'sha davrni ham qamrasin.`;
+      return `\n\n⏱ Last sync was ${m} minutes ago — make the next sync cover that period too.`;
     }
-    return `\n\n⚠️ Oxirgi sync ${m} daqiqa oldin edi. Bu uzoq tanaffus: hozir o'sha ` +
-      `davrda qilingan BARCHA ishni bitta sync bilan yubor, keyin davom et.`;
+    return `\n\n⚠️ Last sync was ${m} minutes ago. That is a long gap: send ALL the work ` +
+      `from that period in one sync now, then carry on.`;
   };
 
   try {
@@ -236,11 +397,11 @@ Deno.serve(async (req: Request) => {
       if (r.status >= 400) return ok(id, fail(JSON.stringify(r.body)));
       const list = (r.body.projects ?? []) as { id: string; name: string; nodes: number; open: number }[];
       if (list.length === 0) {
-        return ok(id, text("Loyiha yo'q. Chat Manager platformasida loyiha yarating."));
+        return ok(id, text("No projects yet. Create one in Loosend first."));
       }
       return ok(id, text(
-        "Loyihalar:\n" +
-          list.map((p) => `· ${p.name} — ${p.nodes} tugun, ${p.open} ochiq\n  id: ${p.id}`).join("\n"),
+        "Projects:\n" +
+          list.map((p) => `· ${p.name} — ${p.nodes} nodes, ${p.open} open\n  id: ${p.id}`).join("\n"),
       ));
     }
 
@@ -256,17 +417,17 @@ Deno.serve(async (req: Request) => {
       if (r.status >= 400) {
         if (r.body.error === "already_linked_elsewhere") {
           return ok(id, fail(
-            "Bu suhbat allaqachon boshqa loyihaga bog'langan va uni jimgina " +
-              "ko'chirib bo'lmaydi. Foydalanuvchiga ayting: agar chindan ham " +
-              "ko'chirmoqchi bo'lsa, Chat Manager UI'sidan qilsin.",
+            "This conversation is already connected to a different project and " +
+              "cannot be moved silently. Tell the user: if they really want to move " +
+              "it, they should do it from the Loosend app.",
           ));
         }
         if (r.body.error === "project_required") {
           const list = (r.body.projects ?? []) as { id: string; name: string }[];
           return ok(id, fail(
-            "Qaysi loyihaga ulashni ko'rsatish kerak. Mavjud loyihalar:\n" +
+            "A project has to be chosen. Available projects:\n" +
               list.map((p) => `· ${p.name} — id: ${p.id}`).join("\n") +
-              "\n\nFoydalanuvchidan qaysi biri ekanini so'ra va project_id bilan qayta chaqir.",
+              "\n\nAsk the user which one, then call again with project_id.",
           ));
         }
         return ok(id, fail(JSON.stringify(r.body)));
@@ -278,58 +439,112 @@ Deno.serve(async (req: Request) => {
       // aynan shu yerda turishi shart: model tool javobini darhol o'qiydi.
       const after = await call({ action: "tree", chat_ref: r.body.chat_ref });
       const treeNow = String(after.body?.tree ?? "").trim();
-      const treeEmpty = !treeNow || treeNow === "(bo'sh)";
+      const treeEmpty = !treeNow || treeNow === "(empty)" || treeNow === "(bo'sh)";
 
       return ok(id, text(
-        `✅ Ulandi: "${r.body.project_name}" loyihasi` +
-          (label ? ` · chat nomi: "${label}"` : "") +
+        `✅ Connected to project "${r.body.project_name}"` +
+          (label ? ` · chat name: "${label}"` : "") +
           refLine(r.body.chat_ref) +
           (treeEmpty
-            ? "\n\n⚠️ KEYINGI QADAM — HOZIR BAJAR. Bu chatdan hali hech narsa " +
-              "yozilmagan. Darhol `chat_manager_sync` ni chaqir va `text` ga " +
-              "SHU SUHBATNING BOSHIDAN hozirgacha bo'lgan mazmunini sol: nima " +
-              "bajarildi, nima rejalashtirildi, nima to'sildi, qanday qarorlar " +
-              "qabul qilindi. O'z izohingni emas — suhbatning o'zini.\n\n" +
-              "Foydalanuvchidan task ro'yxatini yozib berishni yoki tasdiqlashni " +
-              "SO'RAMA. Tasklarni matndan server o'zi ajratadi."
-            : "\n\nEndi har task o'zgarishida chat_manager_sync ni chaqir."),
+            ? "\n\n⚠️ NEXT STEP — DO IT NOW. Nothing from this chat has been " +
+              "recorded yet. Call `chat_manager_sync` immediately and put the " +
+              "content of THIS CONVERSATION FROM ITS START until now into `text`: " +
+              "what was done, what was planned, what got blocked, what was decided. " +
+              "Not your summary of it — the conversation itself.\n\n" +
+              "Do NOT ask the user to write out or confirm a task list. The server " +
+              "extracts tasks from the text on its own."
+            : "\n\nFrom now on, call chat_manager_sync whenever a task changes."),
+      ));
+    }
+
+    /* -------------------------------------------------------- organize -- */
+    if (name === "chat_manager_organize") {
+      const r = await call({
+        action: "organize",
+        chat_ref: chatRef,
+        label,
+        moves: args.moves,
+        merges: args.merges,
+      });
+      if (r.status === 409) {
+        return ok(id, fail(
+          "This conversation is not connected to a project yet. " +
+            "chat_manager_projects → chat_manager_link.",
+        ));
+      }
+      if (r.status >= 400) return ok(id, fail(JSON.stringify(r.body)));
+
+      const unresolved = Array.isArray(r.body.unresolved)
+        ? (r.body.unresolved as string[])
+        : [];
+      const parts = [
+        `Done: ${r.body.moved ?? 0} moved, ${r.body.merged ?? 0} merged.`,
+      ];
+      if (Number(r.body.rejected ?? 0) > 0) {
+        parts.push(
+          `${r.body.rejected} action(s) rejected (cycle, or the node does not exist).`,
+        );
+      }
+      if (unresolved.length) {
+        parts.push(`Not found: ${unresolved.join(", ")} — check the numbers against the tree.`);
+      }
+      const orgTree = String(r.body.tree ?? "").trim();
+      return ok(id, text(
+        parts.join(" ") + (orgTree ? `\n\n${orgTree}` : "") + refLine(r.body.chat_ref),
       ));
     }
 
     /* ------------------------------------------------------------ tree -- */
     if (name === "chat_manager_tree") {
-      const r = await call({ action: "tree", chat_ref: chatRef, label });
+      // Default `open`: agentga har safar 150 qatorlik to'liq daraxt kerak
+      // emas, unga QOLGAN ish kerak. Foydalanuvchi to'liq ro'yxat so'rasa
+      // model scope="all" beradi.
+      const scope = typeof args.scope === "string" ? args.scope : "open";
+      const r = await call({ action: "tree", chat_ref: chatRef, label, scope });
       if (r.status === 409) {
         return ok(id, fail(
-          "Bu suhbat hali loyihaga ulanmagan. chat_manager_projects → chat_manager_link.",
+          "This conversation is not connected to a project yet. " +
+            "chat_manager_projects → chat_manager_link.",
         ));
       }
       if (r.status >= 400) return ok(id, fail(JSON.stringify(r.body)));
       const tree = String(r.body.tree ?? "").trim();
+      // Audit Y6: fon sync yiqilgan bo'lsa, model buni faqat shu yerda
+      // bilib oladi — unga "qayta chaqirma" deyilgan edi.
+      const bgErr = typeof r.body.last_error === "string" && r.body.last_error
+        ? `\n\n⚠️ THE LAST SYNC ENDED WITH AN ERROR: ${r.body.last_error}\n` +
+          `That period's work may be missing from the tree — RESEND the text with ` +
+          `chat_manager_sync.`
+        : "";
       return ok(id, text(
-        `${r.body.project_name ?? "Loyiha"}:\n\n${tree || "(daraxt hali bo'sh)"}` +
-          refLine(r.body.chat_ref) + gapLine(r.body.minutes_since_sync),
+        `${r.body.project_name ?? "Project"}` +
+          (r.body.scope && r.body.scope !== "all"
+            ? ` — ${r.body.scope === "open" ? "open work" : "last 7 days"}`
+            : "") +
+          `:\n\n${tree || "(the tree is still empty)"}` +
+          refLine(r.body.chat_ref) + gapLine(r.body.minutes_since_sync) + bgErr,
       ));
     }
 
     /* ------------------------------------------------------------ sync -- */
     if (name === "chat_manager_sync") {
       const bodyText = String(args.text ?? "").trim();
-      if (!bodyText) return ok(id, fail("`text` bo'sh — yuboradigan narsa yo'q."));
+      if (!bodyText) return ok(id, fail("`text` is empty — there is nothing to send."));
 
       const st = await call({ action: "status", chat_ref: chatRef, label });
-      if (st.status >= 400) return ok(id, fail(`Sessiya ochilmadi: ${JSON.stringify(st.body)}`));
+      if (st.status >= 400) return ok(id, fail(`Could not open a session: ${JSON.stringify(st.body)}`));
 
       if (st.body.status !== "linked") {
         return ok(id, fail(
-          "Bu suhbat hali loyihaga ulanmagan. Avval chat_manager_link ni chaqir." +
-            refLine(st.body.chat_ref),
+          "This conversation is not connected to a project yet. Call " +
+            "chat_manager_link first." + refLine(st.body.chat_ref),
         ));
       }
 
       const cur = Number(st.body.cursor_seq ?? 0);
       const ref = String(st.body.chat_ref ?? "");
       const gapBefore = st.body.minutes_since_sync;
+      const prevErr = typeof st.body.last_error === "string" ? st.body.last_error : null;
 
       const r = await call({
         action: "sync",
@@ -340,7 +555,24 @@ Deno.serve(async (req: Request) => {
 
       if (r.status >= 400) return ok(id, fail(JSON.stringify(r.body)));
 
-      const tree = await call({ action: "tree", chat_ref: ref });
+      // Katta backfill fonda ishlanadi: ingest darhol javob beradi, aks holda
+      // Claude Desktop 60 soniyada uzib yuboradi va model "yiqildi" deb o'ylaydi.
+      if (r.body.queued) {
+        return ok(id, text(
+          `⏳ Text accepted (${r.body.chars} characters) and is being processed in the background.\n\n` +
+          `This is normal for a large backfill — it would exceed the 60-second limit, ` +
+          `so the response was returned immediately.\n\n` +
+          `NEXT STEP: finish your reply, then after a few seconds call ` +
+          `chat_manager_tree to see the result. DO NOT CALL sync again — the work is ` +
+          `already running and a second call would duplicate it.` +
+          refLine(ref),
+        ));
+      }
+
+      // Daraxt endi sync javobida keladi — alohida so'rov kerak emas.
+      const treeText = typeof r.body.tree === "string"
+        ? r.body.tree
+        : String((await call({ action: "tree", chat_ref: ref })).body.tree ?? "");
 
       const applied = Number(r.body.applied ?? 0);
       const ghosts = Number(r.body.ghosts ?? 0);
@@ -349,6 +581,32 @@ Deno.serve(async (req: Request) => {
       // Muntazam 0 dan katta bo'lsa, prompt zaif degani.
       const recovered = Number(r.body.recovered ?? 0);
 
+      // YOPIQ HALQA (audit K4): server nima tushmaganini aytadi, biz modelga
+      // aniq buyruq qilib beramiz. Bu blok javobning OXIRIDA turadi — model
+      // oxirgi ko'rsatmani eng yaxshi bajaradi.
+      const unc = Array.isArray(r.body.uncaptured)
+        ? (r.body.uncaptured as string[]).filter((x) => typeof x === "string")
+        : [];
+      const uncBlock = unc.length
+        ? `\n\n⚠️ THE FOLLOWING LINES WERE NOT CAPTURED:\n` +
+          unc.map((l) => `· ${l}`).join("\n") +
+          `\n\nIf they describe real work, resend EXACTLY these lines (and nothing ` +
+          `else) in a single chat_manager_sync call. If they do not, ignore them.`
+        : "";
+
+      // Audit Y5: "0 o'zgarish" muvaffaqiyat kabi ko'rinmasin
+      const noItemsBlock = r.body.note === "no_items"
+        ? `\n\n⚠️ The server could not extract a single item from the text (in two attempts). ` +
+          (typeof r.body.hint === "string" ? r.body.hint : "")
+        : "";
+
+      // Audit O9: past ishonch bilan jim tashlangan bandlar
+      const skippedN = typeof r.body.skipped === "number" ? r.body.skipped : 0;
+      const skippedBlock = skippedN > 0
+        ? `\n\n(${skippedN} item(s) were dropped for low confidence — if something ` +
+          `important was lost, resend it in clearer wording)`
+        : "";
+
       // Ilgari bu yerda "Sinxronlandi (task signali topilmadi)" yozilardi.
       // Model buni MUVAFFAQIYAT deb o'qib, "loyihada task yo'q ekan" degan
       // xulosaga kelardi va foydalanuvchidan ro'yxatni qo'lda so'rardi.
@@ -356,23 +614,32 @@ Deno.serve(async (req: Request) => {
 
       return ok(id, text(
         (typeof skipped === "string"
-          ? `❌ Daraxtga hech narsa yozilmadi (${skipped}).\n\n` +
-            (hint || "Yuborilgan matnda ish signali topilmadi.") +
-            "\n\nFoydalanuvchidan task ro'yxatini so'rama — matnni to'liqroq " +
-            "qilib qayta chaqir."
-          : `Daraxt yangilandi: ${applied} o'zgarish` +
-            (ghosts ? `, ${ghosts} taxmin` : "") +
-            (recovered ? `, ${recovered} band to'rdan tiklandi` : "")) +
-          `\n\n${String(tree.body.tree ?? "").trim()}` +
+          ? `❌ Nothing was written to the tree (${skipped}).\n\n` +
+            (hint || "No work signal was found in the text you sent.") +
+            "\n\nDo not ask the user for a task list — call again with fuller text."
+          : `Tree updated: ${applied} change(s)` +
+            (ghosts ? `, ${ghosts} guessed` : "") +
+            (recovered ? `, ${recovered} recovered by the safety net` : "") +
+            // Kvitansiya: va'da "hech narsa yo'qolmaydi" bo'lgach, uni
+            // KO'RSATISH kerak. Terminal yo'q — isbot shu qatorda.
+            (typeof r.body.receipt_line === "string"
+              ? `\n${r.body.receipt_line}`
+              : "")) +
+          `\n\n${treeText.trim()}` +
           refLine(ref) +
           (Number(gapBefore) >= 45
-            ? `\n\n(${gapBefore} daqiqalik tanaffus yopildi)`
+            ? `\n\n(closed a ${gapBefore}-minute gap)`
+            : "") +
+          skippedBlock + noItemsBlock + uncBlock +
+          (prevErr
+            ? `\n\n⚠️ Note: the PREVIOUS sync ended with an error (${prevErr}). ` +
+              `If that period's work is missing from the tree, send it too.`
             : ""),
       ));
     }
 
-    return ok(id, fail(`Noma'lum tool: ${name}`));
+    return ok(id, fail(`Unknown tool: ${name}`));
   } catch (e) {
-    return ok(id, fail(`Xato: ${(e as Error)?.message ?? e}`));
+    return ok(id, fail(`Error: ${(e as Error)?.message ?? e}`));
   }
 });

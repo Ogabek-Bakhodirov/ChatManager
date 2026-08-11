@@ -93,6 +93,17 @@ Keep the identifier at the START of the title so it stays traceable:
 Before you answer, scan the messages for every identifier of the form T1, T2, F0, LIN-123,
 #42, 1), a) and confirm each one appears in exactly one item.
 
+## Status changes are items too — do not skip them as "summaries"
+
+A report that previously known work is now finished, blocked, or cancelled IS a work
+item, carrying that status. This is where extraction fails most often in practice:
+the model reads "X hal qilindi" as a recap and skips it, and the tree never learns
+the task closed.
+
+"Sync timeout muammosi hal qilindi" -> item "Sync timeout muammosini hal qilish",
+status done. "Deploy bloklandi, sertifikat kutilmoqda" -> item, status blocked.
+The sentence being short, past-tense, or at the START of a message changes nothing.
+
 ## Decisions that were MADE are work items
 
 A decision that has been settled is work to be done, not discussion:
@@ -112,6 +123,9 @@ matching and are treated as a failed extraction.
 Your first character must be { and your last must be }. No fences, no commentary.`;
 
 export const PASS_B_SYSTEM = `You match extracted work items against an existing task tree.
+
+Each tree line looks like: \`#42 [in_progress] Write the 0011 migration\`
+\`#42\` is that node's id. Indentation shows nesting.
 
 You do NOT extract anything. You do NOT invent work. You only decide, for each item you are
 given, whether it is the SAME WORK as a node already in the tree.
@@ -136,6 +150,12 @@ There are THREE outcomes, not two:
    "transkript parserini yozish" are pieces of it and belong UNDER it as children.
 3. Unrelated to everything → "new" with parent_id = null
 
+**A new ROOT is rare.** Most projects have a handful of phases and areas — and
+new work almost always belongs inside one of them. Before returning
+parent_id = null, scan the tree for a phase, epic, or area this item serves
+("English localization", "Cost reduction", "Canvas v2") and attach it there.
+Return null only when the item genuinely opens a new line of work.
+
 Outcome 2 is the one that gets missed. If an item names a concrete artifact, file, fix,
 or test while the existing node names a phase or goal, it is a CHILD, not a match.
 Matching it collapses the tree into a flat list and loses the detail the user needs.
@@ -150,13 +170,16 @@ work; an extra level is visible and fixable.
 
 ## Output
 
-{"placements":[{"item_index":0,"decision":"match","node_id":"<uuid from the tree>",
+{"placements":[{"item_index":0,"decision":"match","node_id":"#42",
                 "confidence":0.0-1.0,"reason":"<=100 chars"},
-               {"item_index":1,"decision":"new","parent_id":"<uuid from the tree or null>",
+               {"item_index":1,"decision":"new","parent_id":"#7",
                 "confidence":0.0-1.0,"reason":"<=100 chars"}]}
 
 item_index is the 0-based position in the items list. Every item gets exactly one placement.
-node_id and parent_id must be UUIDs copied exactly from the tree, or null.
+
+\`node_id\` and \`parent_id\` are the SHORT IDs shown in the tree — the \`#42\` at the
+start of each line. Copy the number exactly. Never invent one: if no line in the
+tree carries that number, the reference is wrong. Use null when there is no parent.
 
 Your first character must be { and your last must be }. No fences, no commentary.`;
 
@@ -208,9 +231,12 @@ Rules:
 - One item per gap, no extras, no duplicates of work already covered.
 - If a gap is an identifier, put it at the START of the title: "T3 — taste qadamini qo'shish".
 - Same language as the messages.
-- The check is mechanical and can be wrong. If a gap is not real work — a version number,
-  a measurement, a greeting, a question, an option that was rejected — skip it. Returning
-  an empty list is a correct answer.
+- **Default is INCLUDE.** The check is usually right. Treat every flagged line as real
+  work unless it is clearly a greeting, a question, or an option that was explicitly
+  rejected. When unsure, include it: a borderline extra item is cheap and visible,
+  a lost one is silent and permanent. An empty list should be rare.
+- A flagged line that reports existing work finished/blocked is an item with that
+  status — not a summary to skip.
 
 Output the same shape as before, including \`note\` — 2-3 sentences saying what was
 decided or done and why, in the language of the messages:
@@ -246,4 +272,45 @@ export function passBUser(tree: string, items: unknown[]): string {
   return `## Existing tree\n\n\`\`\`\n${tree}\n\`\`\`\n\n## Items to place\n\n\`\`\`json\n${
     JSON.stringify(items, null, 1)
   }\n\`\`\``;
+}
+
+// Gardener — daraxtni davriy butash. Sync'dan MUTLAQO ajralgan: kirish faqat
+// kompakt #N daraxt (~2KB), suhbat matni emas. Shuning uchun arzon, va
+// shuning uchun arzon model ham uddalaydi.
+export const GARDENER_SYSTEM = `You tidy a task tree. You receive the tree and
+return reorganization actions — nothing else.
+
+Each line: \`#42 [status] title\`. Indentation = nesting. \`#42\` is the node id.
+
+## Actions
+
+1. **move** — a root item that clearly belongs under an existing phase/area
+   node. {"op":"move","node":"#118","parent":"#117"}
+   Moving to root: {"op":"move","node":"#5","parent":null}
+2. **merge** — two nodes that describe the SAME work in different words.
+   {"op":"merge","keep":"#116","absorb":"#122"}
+   \`keep\` = the better title (usually the more specific or older one).
+   Absorb's children and history are preserved automatically.
+
+## Rules
+
+- Max 15 actions. Prefer the highest-impact ones: duplicate work items first,
+  then obviously misplaced roots.
+- Merge ONLY when doing one task means doing the other. Similar topic is NOT
+  enough: "write benchmark" and "run benchmark" are different work.
+- Do not invent structure. If nothing clearly needs fixing, return empty lists.
+- Never touch nodes whose placement is plausible. Stability beats tidiness:
+  a node the user has already seen in one place should move only when it is
+  clearly wrong.
+- Use ONLY ids that appear in the tree.
+
+## Output
+
+{"moves":[{"op":"move","node":"#118","parent":"#117"}],
+ "merges":[{"op":"merge","keep":"#116","absorb":"#122"}]}
+
+Your first character must be { and your last must be }. No fences, no commentary.`;
+
+export function gardenerUser(tree: string): string {
+  return `## Tree\n\n\`\`\`\n${tree}\n\`\`\``;
 }
