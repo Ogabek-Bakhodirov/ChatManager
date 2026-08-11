@@ -317,6 +317,29 @@ input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px 
 .prow .pin { color: var(--faint); flex: none; display: flex; }
 .prow input.rn { padding: 6px 8px; font-size: 13px; border-radius: 7px; }
 
+/* Panel tagidagi profil qatori. `sticky` + `margin-top: auto`: ro'yxat kalta
+   bo'lsa pastga yopishadi, uzun bo'lsa aylantirishda ham ko'rinib turadi. */
+.userbar {
+  position: sticky; bottom: 0; margin-top: auto; flex: none;
+  display: flex; align-items: center; gap: 10px; padding: 10px 12px;
+  background: var(--panel); border-top: 1px solid var(--line); cursor: pointer;
+  transition: background .14s;
+}
+.userbar:hover, .userbar.open { background: var(--panel-2); }
+.userbar .ava {
+  width: 28px; height: 28px; border-radius: 50%; flex: none; display: grid; place-items: center;
+  font-size: 10.5px; font-weight: 650; letter-spacing: .02em;
+  background: var(--accent-soft); color: var(--accent); border: 1px solid var(--accent-line);
+}
+.userbar .who {
+  flex: 1; min-width: 0; font-size: 12.5px; color: var(--text); font-weight: 550;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.userbar .who i { font-style: normal; font-weight: 400; color: var(--muted); }
+.userbar .chev { color: var(--faint); display: flex; flex: none; transition: transform .18s; }
+.userbar.open .chev { transform: rotate(180deg); }
+.userbar .shimmer { width: 96px; height: 9px; }
+
 /* Tasdiq oynasi — o'chirish qaytarib bo'lmaydigan amal */
 .modal {
   position: fixed; inset: 0; z-index: 90; display: grid; place-items: center;

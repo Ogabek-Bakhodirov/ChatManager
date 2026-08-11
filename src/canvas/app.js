@@ -193,6 +193,8 @@ const ICO = {
   unpin: '<path d="M9.6 1.9 14.1 6.4l-2 .5-1 1-.5 3.1-4.6-4.6 3.1-.5 1-1Z"/><path d="M6 10 2.4 13.6"/><path d="M2 2l12 12"/>',
   pencil: '<path d="M11.3 2.6a1.6 1.6 0 0 1 2.3 2.3L5.4 13l-3 .7.7-3Z"/><path d="M10.2 3.7l2.1 2.1"/>',
   link: '<path d="M6.8 9.2a2.8 2.8 0 0 0 4 0l2.1-2.1a2.83 2.83 0 0 0-4-4l-1 1"/><path d="M9.2 6.8a2.8 2.8 0 0 0-4 0L3.1 8.9a2.83 2.83 0 0 0 4 4l1-1"/>',
+  down: '<path d="M4 6.4 8 10.4l4-4"/>',
+  out: '<path d="M6.4 13.6H3.6a1.2 1.2 0 0 1-1.2-1.2V3.6a1.2 1.2 0 0 1 1.2-1.2h2.8"/><path d="M10.4 11.2 13.6 8l-3.2-3.2M13.6 8H6"/>',
   trash: '<path d="M2.8 4.4h10.4M6.4 4.4V2.9h3.2v1.5M4.3 4.4l.6 8.5a1 1 0 0 0 1 .9h4.2a1 1 0 0 0 1-.9l.6-8.5"/>',
 };
 
@@ -570,20 +572,91 @@ function Canvas({ nodes, selected, onSelect, freshIds, hiddenCount = 0 }) {
     </div>`;
 }
 
+/* ======================================================================= */
+/*  Menyu — loyiha qatori uchun ham, profil qatori uchun ham bitta joyda.   */
+/*  Klaviatura mantiqini ikki marta yozmaslik uchun ajratildi.             */
+/* ======================================================================= */
+function anchorPos(e, height) {
+  const r = e.currentTarget.getBoundingClientRect();
+  const right = Math.max(10, window.innerWidth - r.right);
+  // Pastga sig'masa yuqoriga ag'daramiz
+  return r.bottom + height > window.innerHeight
+    ? { bottom: window.innerHeight - r.top + 6, right }
+    : { top: r.bottom + 6, right };
+}
+
+function Menu({ title, items, pos, onClose }) {
+  const first = items.findIndex((it) => !it.div && !it.soon);
+  const [cur, setCur] = useState(first < 0 ? 0 : first);
+  const rows = items.map((it, i) => (it.div || it.soon ? null : i)).filter((i) => i !== null);
+
+  useEffect(() => {
+    const onDown = (e) => { if (!e.target.closest(".pmenu")) onClose(); };
+    const onKey = (e) => {
+      if (e.key === "Escape") { e.preventDefault(); onClose(); return; }
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        const at = rows.indexOf(cur);
+        setCur(e.key === "ArrowDown"
+          ? rows[(at + 1) % rows.length]
+          : rows[(at - 1 + rows.length) % rows.length]);
+        return;
+      }
+      if (e.key === "Enter") {
+        e.preventDefault();
+        const it = items[cur];
+        if (it?.run) { onClose(); it.run(); }
+        return;
+      }
+      const hit = items.find((it) => it.k && !it.soon && it.k === e.key.toUpperCase());
+      if (hit) { e.preventDefault(); onClose(); hit.run(); }
+    };
+    document.addEventListener("mousedown", onDown);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [cur, items, onClose]);
+
+  return html`
+    <div class="pmenu" style=${{
+      top: pos.top != null ? pos.top + "px" : undefined,
+      bottom: pos.bottom != null ? pos.bottom + "px" : undefined,
+      right: pos.right + "px",
+    }}>
+      ${title ? html`<div class="mhead">${title}</div>` : null}
+      ${items.map((it, i) => it.div
+        ? html`<div class="mdiv" key=${"d" + i}></div>`
+        : html`
+          <button key=${it.k ?? i}
+                  class=${"mi" + (it.danger ? " danger" : "") + (it.soon ? " soon" : "")
+                         + (cur === i && !it.soon ? " cur" : "")}
+                  disabled=${!!it.soon}
+                  onMouseEnter=${() => { if (!it.soon) setCur(i); }}
+                  onClick=${() => { if (it.run) { onClose(); it.run(); } }}>
+            <${Icon} n=${it.icon} />
+            <span class="lbl">${it.label}</span>
+            <span class="k">${it.soon ? "Soon" : it.k}</span>
+          </button>`)}
+    </div>`;
+}
+
 function Projects({ projects, activeId, onPick, onNew, onCopy, onRecovery, copiedId,
                     chats, open, onToggle, loading,
-                    onRename, onArchive, onDelete, onCopyLink, onTogglePin, isPinned, demo }) {
+                    onRename, onArchive, onDelete, onCopyLink, onTogglePin, isPinned, demo,
+                    me, theme, onTheme, onSignOut, onRefresh }) {
   const linked = chats.filter((c) => c.status === "linked").length;
   const pending = chats.length - linked;
 
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState("");
-  const [menu, setMenu] = useState(null);         // { id, top?, bottom?, right }
-  const [cur, setCur] = useState(0);              // klaviatura bilan tanlangan band
+  const [menu, setMenu] = useState(null);         // { id, pos }
+  const [umenu, setUmenu] = useState(null);       // profil menyusi: { pos }
   const [editing, setEditing] = useState(null);   // nomi tahrirlanayotgan id
   const [draft, setDraft] = useState("");
 
-  const closeMenu = () => { setMenu(null); setCur(0); };
+  const closeMenu = () => setMenu(null);
 
   const startRename = (p) => { closeMenu(); setEditing(p.id); setDraft(p.name ?? ""); };
   const commitRename = (p) => {
@@ -608,53 +681,18 @@ function Projects({ projects, activeId, onPick, onNew, onCopy, onRecovery, copie
   const openMenu = (p, e) => {
     e.stopPropagation();
     if (menu?.id === p.id) { closeMenu(); return; }
-    const r = e.currentTarget.getBoundingClientRect();
-    const H = 268;                                  // menyuning taxminiy balandligi
-    const right = Math.max(10, window.innerWidth - r.right);
-    // Pastga sig'masa yuqoriga ag'daramiz
-    setMenu(r.bottom + H > window.innerHeight
-      ? { id: p.id, bottom: window.innerHeight - r.top + 6, right }
-      : { id: p.id, top: r.bottom + 6, right });
-    setCur(0);
+    setMenu({ id: p.id, pos: anchorPos(e, 268) });
   };
 
-  // Tashqariga bosish, Escape va klaviatura — menyu ochiq bo'lgandagina
-  useEffect(() => {
-    if (!menu) return;
-    const p = projects.find((x) => x.id === menu.id);
-    if (!p) { closeMenu(); return; }
-    const items = itemsFor(p);
-    const rows = items.map((it, i) => (it.div || it.soon ? null : i)).filter((i) => i !== null);
-
-    const onDown = (e) => { if (!e.target.closest(".pmenu")) closeMenu(); };
-    const onKey = (e) => {
-      if (e.key === "Escape") { e.preventDefault(); closeMenu(); return; }
-      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
-        e.preventDefault();
-        const at = rows.indexOf(cur);
-        const next = e.key === "ArrowDown"
-          ? rows[(at + 1) % rows.length]
-          : rows[(at - 1 + rows.length) % rows.length];
-        setCur(next);
-        return;
-      }
-      if (e.key === "Enter") {
-        e.preventDefault();
-        const it = items[cur];
-        if (it?.run) { closeMenu(); it.run(); }
-        return;
-      }
-      const hit = items.find((it) => it.k && !it.soon && it.k === e.key.toUpperCase());
-      if (hit) { e.preventDefault(); closeMenu(); hit.run(); }
-    };
-
-    document.addEventListener("mousedown", onDown);
-    window.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDown);
-      window.removeEventListener("keydown", onKey);
-    };
-  }, [menu, cur, projects]);
+  const userItems = () => (demo
+    ? [{ k: "X", label: "Exit demo", icon: "out", danger: true, run: () => location.reload() }]
+    : [
+      { k: "R", label: "Refresh data", icon: "refresh", run: onRefresh },
+      { k: "T", label: theme === "light" ? "Dark theme" : "Light theme",
+        icon: theme === "light" ? "moon" : "sun", run: onTheme },
+      { div: true },
+      { k: "S", label: "Sign out", icon: "out", danger: true, run: onSignOut },
+    ]);
 
   return html`
     <div class="left">
@@ -764,31 +802,14 @@ function Projects({ projects, activeId, onPick, onNew, onCopy, onRecovery, copie
                 </div>`)}
             </div>`}
 
-      ${menu && projects.find((x) => x.id === menu.id) ? (() => {
-        const p = projects.find((x) => x.id === menu.id);
-        const items = itemsFor(p);
-        return html`
-          <div class="pmenu" style=${{
-            top: menu.top != null ? menu.top + "px" : undefined,
-            bottom: menu.bottom != null ? menu.bottom + "px" : undefined,
-            right: menu.right + "px",
-          }}>
-            <div class="mhead">${p.name}</div>
-            ${items.map((it, i) => it.div
-              ? html`<div class="mdiv" key=${"d" + i}></div>`
-              : html`
-                <button key=${it.k}
-                        class=${"mi" + (it.danger ? " danger" : "") + (it.soon ? " soon" : "")
-                               + (cur === i && !it.soon ? " cur" : "")}
-                        disabled=${!!it.soon}
-                        onMouseEnter=${() => { if (!it.soon) setCur(i); }}
-                        onClick=${() => { if (it.run) { closeMenu(); it.run(); } }}>
-                  <${Icon} n=${it.icon} />
-                  <span class="lbl">${it.label}</span>
-                  <span class="k">${it.soon ? "Soon" : it.k}</span>
-                </button>`)}
-          </div>`;
-      })() : null}
+      ${menu && projects.find((x) => x.id === menu.id)
+        ? html`<${Menu} title=${projects.find((x) => x.id === menu.id).name}
+                 items=${itemsFor(projects.find((x) => x.id === menu.id))}
+                 pos=${menu.pos} onClose=${closeMenu} />`
+        : null}
+
+      ${umenu ? html`<${Menu} title=${me?.email ?? "Demo mode"} items=${userItems()}
+                       pos=${umenu.pos} onClose=${() => setUmenu(null)} />` : null}
 
       ${activeId ? html`
         <div class="sep"></div>
@@ -832,7 +853,28 @@ function Projects({ projects, activeId, onPick, onNew, onCopy, onRecovery, copie
             ${copiedId === "__recovery__" ? "Copied" : "Copy recovery prompt"}
           </button>
         </div>` : null}
+
+      <div class=${"userbar" + (umenu ? " open" : "")}
+           onClick=${(e) => setUmenu(umenu ? null : { pos: anchorPos(e, 190) })}>
+        <div class="ava">${initials(me?.name ?? me?.email ?? (demo ? "Demo" : "?"))}</div>
+        ${me || demo
+          ? html`<div class="who">
+                   ${demo ? "Demo mode" : (me.name ?? me.email)}
+                   ${!demo && me.workspace ? html` · <i>${me.workspace}</i>` : null}
+                 </div>`
+          : html`<span class="shimmer"></span>`}
+        <span class="chev"><${Icon} n="down" /></span>
+      </div>
     </div>`;
+}
+
+/* "ogabek.bakhodirov@gmail.com" -> "OB", "Ogabek Bakhodirov" -> "OB" */
+function initials(v) {
+  const src = String(v ?? "").split("@")[0].replace(/[._-]+/g, " ").trim();
+  const parts = src.split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  const two = (parts[0][0] ?? "") + (parts[1]?.[0] ?? "");
+  return two.toUpperCase() || "?";
 }
 
 /* Yig'iladigan bo'lim. Sarlavhaning o'zi tugma — o'ngdagi panel tor,
@@ -1139,6 +1181,7 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [deleting, setDeleting] = useState(null);
   const [treeLoading, setTreeLoading] = useState(false);
+  const [me, setMe] = useState(null);
   /* Pin — shaxsiy ko'rinish sozlamasi, loyiha ma'lumoti emas. Shuning uchun
      `projects.settings` ga emas, brauzerga yoziladi: bir foydalanuvchining
      tartibi boshqa a'zolarning ro'yxatini o'zgartirib yubormasin. */
@@ -1373,6 +1416,30 @@ function App() {
     } catch { /* file:// da ishlamaydi, muhim emas */ }
   }, [activeId, demo]);
 
+  // Kim kirgani va qaysi workspace — profil qatori uchun
+  useEffect(() => {
+    if (!sb) return;
+    let alive = true;
+    (async () => {
+      const { data: u } = await sb.auth.getUser();
+      const { data: ws } = await sb.from("workspaces").select("name").limit(1);
+      if (!alive) return;
+      setMe({
+        email: u?.user?.email ?? saved?.email ?? "",
+        name: u?.user?.user_metadata?.full_name ?? null,
+        workspace: ws?.[0]?.name ?? null,
+      });
+    })();
+    return () => { alive = false; };
+  }, [sb]);
+
+  const signOut = useCallback(async () => {
+    try { await sb?.auth?.signOut(); } catch { /* sessiya allaqachon yopiq */ }
+    // Sahifani qayta yuklaymiz: holat ko'p joyda tarqalgan va uni qo'lda
+    // tozalash keyingi kirishda eski loyihalar chiqib qolishiga olib kelardi.
+    location.reload();
+  }, [sb]);
+
   useEffect(() => { if (sb) loadProjects(sb); }, [sb, loadProjects]);
   useEffect(() => { if (sb && activeId) loadTree(sb, activeId); }, [sb, activeId, loadTree]);
 
@@ -1466,7 +1533,9 @@ function App() {
                      onCopy=${copyPhrase} onRecovery=${copyRecovery}
                      demo=${demo} onRename=${renameProject} onArchive=${archiveProject}
                      onDelete=${(p) => setDeleting(p)} onCopyLink=${copyProjectLink}
-                     onTogglePin=${togglePin} isPinned=${isPinned} />
+                     onTogglePin=${togglePin} isPinned=${isPinned}
+                     me=${me} theme=${theme} onTheme=${toggleTheme}
+                     onSignOut=${signOut} onRefresh=${() => load(sb)} />
         <${Canvas} key=${activeId + ":" + (hideDone ? "1" : "0") + ":" + activeName}
                    nodes=${shown} selected=${selected} onSelect=${setSelected}
                    freshIds=${freshIds.current} hiddenCount=${hidden} />
