@@ -545,10 +545,29 @@ button.danger[disabled] { opacity: .45; filter: none; }
 .empty .ico { color: var(--faint); }
 .empty .h { font-size: 13px; font-weight: 600; color: var(--text-dim); }
 .empty .p { font-size: 12px; line-height: 1.55; color: var(--faint); max-width: 220px; }
+/* Shimmer: opacity pulsatsiyasi emas, o'tuvchi yorug'lik. Pulsatsiya
+   "sahifa xato" degan taassurot beradi, siljish esa "yuklanyapti" deydi. */
 .skel { padding: 6px 14px 14px; display: flex; flex-direction: column; gap: 9px; }
-.skel i { display: block; height: 10px; border-radius: 5px; background: var(--panel-3);
-          animation: sheen 1.5s ease-in-out infinite; }
-@keyframes sheen { 0%,100% { opacity: 1 } 50% { opacity: .45 } }
+.skel i, .shimmer {
+  display: block; height: 10px; border-radius: 5px; background: var(--panel-3);
+  position: relative; overflow: hidden;
+}
+.skel i::after, .shimmer::after {
+  content: ""; position: absolute; inset: 0;
+  background: linear-gradient(90deg, transparent 0%, var(--line-strong) 50%, transparent 100%);
+  transform: translateX(-100%);
+  animation: shimmer 1.3s ease-in-out infinite;
+}
+@keyframes shimmer { to { transform: translateX(100%); } }
+
+/* Serverdan javob kutayotgan loyiha qatori */
+.prow.pending { cursor: default; }
+.prow.pending .av { color: var(--faint); }
+.prow.pending .t { color: var(--muted); }
+.prow .shimmer { width: 78px; height: 8px; margin-top: 4px; }
+.newrow { padding: 2px 0 4px; }
+.newrow input { padding: 7px 9px; font-size: 13px; border-radius: 8px; }
+.newrow .hintline { font-size: 11px; color: var(--faint); margin: 6px 2px 0; }
 
 .toast {
   position: fixed; left: 50%; bottom: 26px; transform: translate(-50%, 8px);

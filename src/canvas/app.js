@@ -570,6 +570,8 @@ function Projects({ projects, activeId, onPick, onNew, onCopy, onRecovery, copie
   const linked = chats.filter((c) => c.status === "linked").length;
   const pending = chats.length - linked;
 
+  const [creating, setCreating] = useState(false);
+  const [newName, setNewName] = useState("");
   const [menuFor, setMenuFor] = useState(null);   // menyu ochilgan loyiha id
   const [editing, setEditing] = useState(null);   // nomi tahrirlanayotgan id
   const [draft, setDraft] = useState("");
@@ -612,7 +614,9 @@ function Projects({ projects, activeId, onPick, onNew, onCopy, onRecovery, copie
       <h3>
         Projects<span class="spacer"></span>
         <span class="n">${projects.length}</span>
-        <button class="newbtn" onClick=${onNew}><${Icon} n="plus" />New</button>
+        <button class="newbtn" onClick=${() => { setNewName(""); setCreating(true); }}>
+          <${Icon} n="plus" />New
+        </button>
       </h3>
 
       ${loading
@@ -626,10 +630,26 @@ function Projects({ projects, activeId, onPick, onNew, onCopy, onRecovery, copie
                  </div>`
           : html`
             <div class="plist">
+              ${creating ? html`
+                <div class="newrow">
+                  <input placeholder="Project name" value=${newName} autoFocus
+                         onInput=${(e) => setNewName(e.target.value)}
+                         onKeyDown=${(e) => {
+                           if (e.key === "Enter") {
+                             e.preventDefault();
+                             const v = newName.trim();
+                             if (v) { onNew(v); setCreating(false); setNewName(""); }
+                           }
+                           if (e.key === "Escape") { e.preventDefault(); setCreating(false); }
+                         }}
+                         onBlur=${() => { if (!newName.trim()) setCreating(false); }} />
+                  <div class="hintline">Enter to create · Esc to cancel</div>
+                </div>` : null}
+
               ${projects.map((p) => html`
                 <div key=${p.id}>
-                  <div class=${"prow" + (p.id === activeId ? " on" : "")}
-                       onClick=${() => editing === p.id || onPick(p.id)}>
+                  <div class=${"prow" + (p.id === activeId ? " on" : "") + (p.pending ? " pending" : "")}
+                       onClick=${() => { if (!p.pending && editing !== p.id) onPick(p.id); }}>
                     <div class="av">${String(p.name ?? "?").slice(0, 1).toUpperCase()}</div>
                     <div class="nm">
                       ${editing === p.id
@@ -646,14 +666,16 @@ function Projects({ projects, activeId, onPick, onNew, onCopy, onRecovery, copie
                                onDoubleClick=${(e) => { e.stopPropagation(); startRename(p); }}>
                             ${p.name}
                           </div>
-                          <div class="ct">
-                            ${p.nodes ?? 0} nodes
-                            ${p.id === activeId && chats.length
-                              ? html`<i></i>${linked} chat${linked === 1 ? "" : "s"}`
-                              : null}
-                          </div>`}
+                          ${p.pending
+                            ? html`<span class="shimmer"></span>`
+                            : html`<div class="ct">
+                                ${p.nodes ?? 0} nodes
+                                ${p.id === activeId && chats.length
+                                  ? html`<i></i>${linked} chat${linked === 1 ? "" : "s"}`
+                                  : null}
+                              </div>`}`}
                     </div>
-                    ${editing === p.id ? null : html`
+                    ${editing === p.id || p.pending ? null : html`
                       <button class=${"copy" + (copiedId === p.id ? " done" : "")}
                               title="Copy connect phrase"
                               onClick=${(e) => { e.stopPropagation(); onCopy(p); }}>
@@ -1029,6 +1051,7 @@ function App() {
   const [rightOpen, setRightOpen] = useState(true);
   const [loading, setLoading] = useState(false);
   const [deleting, setDeleting] = useState(null);
+  const [treeLoading, setTreeLoading] = useState(false);
   const [hideDone, setHideDone] = useState(() => {
     try { return localStorage.getItem("cm_hide_done") === "1"; } catch { return false; }
   });
@@ -1077,6 +1100,8 @@ function App() {
 
   const loadTree = useCallback(async (client, pid) => {
     if (!pid) { setNodes([]); setEvents([]); setChats([]); return; }
+    setTreeLoading(true);
+    try {
     const { data: ns } = await client.from("nodes")
       .select("id,parent_id,title,status,type,position,is_ghost,note,evidence_quote,origin_session_id")
       .eq("project_id", pid);
@@ -1088,6 +1113,7 @@ function App() {
     const { data: cs } = await client.from("chat_sessions")
       .select("id,label,title,source,color,status,chat_ref").eq("project_id", pid);
     setChats(cs ?? []);
+    } finally { setTreeLoading(false); }
   }, []);
 
   const load = useCallback(async (client) => {
@@ -1099,19 +1125,37 @@ function App() {
     } finally { setLoading(false); }
   }, [loadProjects, loadTree, activeId]);
 
-  const newProject = useCallback(async () => {
-    const name = prompt("Project name:");
-    if (!name?.trim()) return;
-    const { data: wm } = await sb.from("workspace_members").select("workspace_id").limit(1);
+  /* Optimistik yaratish. Ilgari bu yerda prompt() turardi (brauzerni
+     bloklaydi), keyin insert kutilardi, keyin BUTUN ro'yxat qaytadan
+     yuklanardi — uch bosqich, hech biri ko'rinmasdi va ilova qotgandek
+     tuyulardi. Endi qator darhol chiqadi va shimmer bilan javob kutadi.
+     Xato bo'lsa qator olib tashlanadi. */
+  const newProject = useCallback(async (name) => {
+    if (!guard()) return;
+
+    const tempId = "tmp_" + Math.random().toString(36).slice(2);
+    setProjects((cur) => [...cur, { id: tempId, name, nodes: 0, pending: true }]);
+
+    const fail = (msg) => {
+      setProjects((cur) => cur.filter((x) => x.id !== tempId));
+      say(msg);
+    };
+
+    const { data: wm, error: wmErr } = await sb
+      .from("workspace_members").select("workspace_id").limit(1);
+    if (wmErr) return fail("Error: " + wmErr.message);
     const ws = wm?.[0]?.workspace_id;
-    if (!ws) { say("No workspace found"); return; }
+    if (!ws) return fail("No workspace found");
+
     const { data, error } = await sb.from("projects")
-      .insert({ workspace_id: ws, name: name.trim() }).select("id,name").single();
-    if (error) { say("Error: " + error.message); return; }
-    await loadProjects(sb);
+      .insert({ workspace_id: ws, name }).select("id,name,settings").single();
+    if (error) return fail("Error: " + error.message);
+
+    setProjects((cur) => cur.map((x) => (x.id === tempId ? { ...data, nodes: 0 } : x)));
     setActiveId(data.id);
+    setSelected(null);
     say(`"${data.name}" created`);
-  }, [sb, loadProjects]);
+  }, [sb, demo]);
 
   const guard = () => {
     if (demo) { say("Not available in demo mode"); return false; }
@@ -1121,10 +1165,15 @@ function App() {
 
   const renameProject = useCallback(async (p, name) => {
     if (!guard()) return;
-    const { error } = await sb.from("projects").update({ name }).eq("id", p.id);
-    if (error) { say("Rename failed: " + error.message); return; }
+    const before = p.name;
+    // Darhol ko'rsatamiz, xato bo'lsa qaytaramiz — nomni o'zgartirish
+    // amalda deyarli hech qachon yiqilmaydi, kutib turishning ma'nosi yo'q.
     setProjects((cur) => cur.map((x) => (x.id === p.id ? { ...x, name } : x)));
-    say(`Renamed to "${name}"`);
+    const { error } = await sb.from("projects").update({ name }).eq("id", p.id);
+    if (error) {
+      setProjects((cur) => cur.map((x) => (x.id === p.id ? { ...x, name: before } : x)));
+      say("Rename failed: " + error.message);
+    }
   }, [sb, demo]);
 
   // Arxivlash — yumshoq o'chirish. `archived_at` to'lganda loyiha ro'yxatdan
@@ -1283,14 +1332,15 @@ function App() {
                      copiedId=${copiedId} loading=${loading}
                      open=${leftOpen} onToggle=${setLeftOpen}
                      onPick=${(id) => { setActiveId(id); setSelected(null); }}
-                     onNew=${demo ? () => say("Creating projects is disabled in demo mode") : newProject}
+                     onNew=${newProject}
                      onCopy=${copyPhrase} onRecovery=${copyRecovery}
                      demo=${demo} onRename=${renameProject} onArchive=${archiveProject}
                      onDelete=${(p) => setDeleting(p)} />
         <${Canvas} key=${activeId + ":" + (hideDone ? "1" : "0") + ":" + activeName}
                    nodes=${shown} selected=${selected} onSelect=${setSelected}
                    freshIds=${freshIds.current} hiddenCount=${hidden} />
-        <${Side} selected=${selected} events=${events} chats=${chats} loading=${loading}
+        <${Side} selected=${selected} events=${events} chats=${chats}
+                 loading=${loading || treeLoading}
                  open=${rightOpen} onToggle=${setRightOpen}
                  sb=${sb} demo=${demo} onEnableRaw=${enableStoreRaw}
                  storeRaw=${!!projects.find((p) => p.id === activeId)?.settings?.store_raw} />
