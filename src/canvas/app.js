@@ -291,7 +291,7 @@ function Mark({ size = 22, tiny = false }) {
   };
   return html`
     <svg class="cm-mark" viewBox="0 0 20 20" width=${size} height=${size}
-         role="img" aria-label="Chat Manager">
+         role="img" aria-label="Loosend">
       <path d=${left} ...${stroke} />
       <path d=${right} ...${stroke} />
       <rect x=${tiny ? 8 : 8.1} y=${tiny ? 8 : 8.1}
@@ -1098,7 +1098,7 @@ function Gate({ onReady, initial, theme, onTheme }) {
       <div class="card">
         <div class="mark">
           <${Mark} size=${30} />
-          <span class="wm">Chat Manager</span>
+          <span class="wm">Loosend</span>
           <span style=${{ flex: 1 }}></span>
           <button class="icon ghost" title="Toggle theme" onClick=${onTheme}>
             <${Icon} n=${theme === "light" ? "moon" : "sun"} />
@@ -1361,8 +1361,10 @@ function App() {
     say(toastMsg);
   }, []);
 
-  // DIQQAT: ulash iborasi o'zbekcha qoladi — uni skill "Chat Manager: ula →"
-  // shakli bo'yicha taniydi. Ingliz tiliga o'girilsa mos kelmay qoladi.
+  // DIQQAT: bu PROTOKOL, brend emas. Skill, MCP serveri va chatdagi model
+  // aynan "Chat Manager: ula →" shaklini qidiradi. Mahsulot nomi Loosend ga
+  // o'zgardi, lekin bu qatorni o'zgartirish uchun skill + mcp + ingest ni
+  // BIR VAQTDA yangilash kerak; aks holda mavjud chatlar ulanmay qoladi.
   const copyProjectLink = useCallback((p) => {
     const base = location.origin + location.pathname;
     copyText(`${base}?project=${p.id}`, p.id, "Project link copied");
@@ -1476,7 +1478,7 @@ function App() {
                     if (client) setSb(client);
                     else {
                       setDemo(true); setNodes(DEMO); setEvents(DEMO_EVENTS);
-                      setProjects([{ id: "demo", name: "Chat Manager", nodes: DEMO.length }]);
+                      setProjects([{ id: "demo", name: "Loosend", nodes: DEMO.length }]);
                       setActiveId("demo");
                       setChats([
                         { id: "c1", status: "linked" }, { id: "c2", status: "linked" },
@@ -1497,7 +1499,7 @@ function App() {
   return html`
     <div class="app">
       <div class="top">
-        <div class="brand"><${Mark} size=${22} /><span class="wm">Chat Manager</span></div>
+        <div class="brand"><${Mark} size=${22} /><span class="wm">Loosend</span></div>
         <div class="stats">
           <span><b>${nodes.length}</b> nodes</span>
           <span><i class="sq" style=${{ background: "var(--done)" }}></i><b>${counts.done ?? 0}</b> done</span>

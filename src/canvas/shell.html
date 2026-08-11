@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Chat Manager — Canvas</title>
+<title>Loosend — the task tree for AI chats</title>
 <!-- Belgi inline data URI: tashqi so'rov yo'q, offline ham ko'rinadi. -->
 <link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2020%2020%22%3E%3Crect%20width%3D%2220%22%20height%3D%2220%22%20rx%3D%224.5%22%20fill%3D%22%230F1211%22%2F%3E%3Cpath%20d%3D%22M7.6%204.4H5.2a.9.9%200%200%200-.9.9v9.4c0%20.5.4.9.9.9h2.4%22%20fill%3D%22none%22%20stroke%3D%22%23E9EBE7%22%20stroke-width%3D%221.8%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%2F%3E%3Cpath%20d%3D%22M12.4%204.4h2.4c.5%200%20.9.4.9.9v9.4a.9.9%200%200%201-.9.9h-2.4%22%20fill%3D%22none%22%20stroke%3D%22%23E9EBE7%22%20stroke-width%3D%221.8%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%2F%3E%3Crect%20x%3D%228%22%20y%3D%228%22%20width%3D%224%22%20height%3D%224%22%20rx%3D%221.2%22%20fill%3D%22%233FA79A%22%2F%3E%3C%2Fsvg%3E" />
 <style>
@@ -146,8 +146,9 @@ svg.i { width: 15px; height: 15px; flex: none; stroke: currentColor; fill: none;
   display: flex; align-items: center; gap: 18px; padding: 0 14px;
   background: var(--panel); border-bottom: 1px solid var(--line);
 }
-/* BREND QOIDASI: so'z belgisi bir rangda. "Manager" ni aksentga bo'yash
-   taqiqlangan — aksent faqat belgidagi tugun kvadratiga tegishli. */
+/* BREND QOIDASI: so'z belgisi bir rangda, aksent FAQAT belgidagi tugun
+   kvadratiga tegishli. So'z belgisining biror qismini aksentga bo'yash
+   taqiqlangan. */
 .brand { display: flex; align-items: center; gap: 10px; flex: none;
          font-weight: 600; letter-spacing: -0.02em; font-size: 14.5px; color: var(--text); }
 .brand .wm { white-space: nowrap; }
