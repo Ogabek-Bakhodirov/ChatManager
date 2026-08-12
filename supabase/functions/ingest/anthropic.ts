@@ -8,6 +8,15 @@ const DEFAULT_MODEL = "claude-haiku-4-5";
 const PRICE_IN_PER_TOKEN = 1 / 1_000_000;
 const PRICE_OUT_PER_TOKEN = 5 / 1_000_000;
 
+// Prompt caching narx koeffitsientlari (Anthropic):
+//   kesh YOZISH  — 1.25x (bir marta, birinchi chaqiruvda)
+//   kesh O'QISH  — 0.1x  (keyingi har chaqiruvda)
+// Bularsiz hisob-kitob xato bo'ladi: biz keshdan o'qilgan tokenni ham to'liq
+// narxda sanardik, ya'ni `cost_usd` haqiqatdan yuqori chiqardi. Arzon modelga
+// o'tish qarori aynan shu raqamga tayanadi — shuning uchun to'g'ri bo'lishi shart.
+const CACHE_WRITE_MULT = 1.25;
+const CACHE_READ_MULT = 0.1;
+
 export interface LlmResult<T> {
   data: T | null;
   inputTokens: number;
@@ -16,6 +25,10 @@ export interface LlmResult<T> {
   raw: string;
   truncated?: boolean;
   salvaged?: boolean;
+  /** Keshdan o'qilgan tokenlar — kesh ishlayotganini tekshirish uchun. */
+  cacheRead?: number;
+  /** Keshga yozilgan tokenlar (birinchi chaqiruv). */
+  cacheWrite?: number;
   error?: string;
 }
 
@@ -26,9 +39,36 @@ export interface LlmResult<T> {
 export async function callJson<T>(
   system: string,
   user: string,
-  opts: { maxTokens?: number; model?: string; apiKey: string },
+  opts: {
+    maxTokens?: number;
+    model?: string;
+    apiKey: string;
+    /**
+     * `user` dan OLDIN yuboriladigan, keshlanadigan blok.
+     *
+     * Kesh prefiks bo'yicha ishlaydi: faqat xabarning BOSHIDAN boshlangan
+     * bir xil qism keshdan o'qiladi. Shuning uchun ketma-ket chaqiruvlarda
+     * o'zgarmaydigan narsa (Pass B uchun — daraxt) shu yerga, o'zgaruvchisi
+     * (bandlar ro'yxati) esa `user` ga tushadi.
+     *
+     * Daraxt har syncda arang o'zgaradi, ya'ni deyarli har doim kesh hit.
+     */
+    cachedPrefix?: string;
+  },
 ): Promise<LlmResult<T>> {
   const model = opts.model ?? Deno.env.get("EXTRACTOR_MODEL") ?? DEFAULT_MODEL;
+
+  // Kesh bloki juda kichik bo'lsa foyda yo'q (Anthropic minimal uzunlik
+  // talab qiladi va hit bo'lmasa 1.25x yozuv narxi bekorga to'lanadi).
+  const prefix = (opts.cachedPrefix ?? "").trim();
+  const usePrefix = prefix.length >= 2000;
+
+  const userContent = usePrefix
+    ? [
+      { type: "text", text: prefix, cache_control: { type: "ephemeral" } },
+      { type: "text", text: user },
+    ]
+    : [{ type: "text", text: prefix ? `${prefix}\n\n${user}` : user }];
 
   const res = await fetch(API_URL, {
     method: "POST",
@@ -46,7 +86,7 @@ export async function callJson<T>(
         // Tizim prompti o'zgarmaydi -> keshlaymiz, input narxi tushadi
         cache_control: { type: "ephemeral" },
       }],
-      messages: [{ role: "user", content: user }],
+      messages: [{ role: "user", content: userContent }],
     }),
   });
 
@@ -68,10 +108,17 @@ export async function callJson<T>(
     .map((c: { text: string }) => c.text)
     .join("");
 
-  const inTok = (json.usage?.input_tokens ?? 0) +
-    (json.usage?.cache_read_input_tokens ?? 0) +
-    (json.usage?.cache_creation_input_tokens ?? 0);
+  const freshIn = json.usage?.input_tokens ?? 0;
+  const cacheRead = json.usage?.cache_read_input_tokens ?? 0;
+  const cacheWrite = json.usage?.cache_creation_input_tokens ?? 0;
+
+  const inTok = freshIn + cacheRead + cacheWrite;
   const outTok = json.usage?.output_tokens ?? 0;
+
+  // Har token turi o'z narxida
+  const inCost = (freshIn +
+    cacheRead * CACHE_READ_MULT +
+    cacheWrite * CACHE_WRITE_MULT) * PRICE_IN_PER_TOKEN;
 
   const truncated = json.stop_reason === "max_tokens";
   let data = parseJson<T>(text);
@@ -90,7 +137,9 @@ export async function callJson<T>(
     data,
     inputTokens: inTok,
     outputTokens: outTok,
-    costUsd: inTok * PRICE_IN_PER_TOKEN + outTok * PRICE_OUT_PER_TOKEN,
+    costUsd: inCost + outTok * PRICE_OUT_PER_TOKEN,
+    cacheRead,
+    cacheWrite,
     raw: text,
     truncated,
     salvaged,

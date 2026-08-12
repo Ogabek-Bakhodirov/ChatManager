@@ -21,7 +21,8 @@ import {
   passARetryUser,
   passAUser,
   passBStructureUser,
-  passBUser,
+  passBItemsBlock,
+  passBTreeBlock,
   GARDENER_SYSTEM,
   gardenerUser,
 } from "./prompts.ts";
@@ -43,6 +44,9 @@ interface Item {
   note?: string;              // 2-3 gapli xulosa — canvas'da "nima qaror qilindi"
   parent_hint?: string | null;
   confidence?: number;
+  /** Faqat matn OSHKORA "qayta ochildi" deganda true. 0013 qo'riqchisidan
+      o'tishning yagona yo'li. */
+  reopened?: boolean;
   evidence?: string;
   evidence_message_id?: string;
 }
@@ -72,7 +76,7 @@ interface Session {
 
 // Qaysi versiya jonli ekanini javobdan bilish uchun. Deploy qilinganini
 // tekshirishning eng oddiy yo'li.
-const VERSION = "0.14.0";
+const VERSION = "0.18.0";
 
 /* Fon rejimi chegarasi. 6000 belgi ~ 1500 token: bundan kichik delta Pass A da
    10-20 soniyada tugaydi va 60 soniyalik chegaraga bemalol sig'adi. Kattasi
@@ -538,7 +542,7 @@ async function runPipeline(
   const chunks = chunkBlocks(blocks);
   const groups: Item[][] = [];
 
-  let inTok = 0, outTok = 0, cost = 0;
+  let inTok = 0, outTok = 0, cost = 0, cacheRead = 0;
   let passAError: string | null = null;
 
   for (const chunk of chunks) {
@@ -550,6 +554,7 @@ async function runPipeline(
     inTok += a.inputTokens;
     outTok += a.outputTokens;
     cost += a.costUsd;
+    cacheRead += a.cacheRead ?? 0;
 
     if (a.error || !a.data?.items) {
       // BITTA bo'lak yiqilsa to'xtamaymiz. Qolganlari o'z bandlarini beradi,
@@ -601,6 +606,7 @@ async function runPipeline(
     inTok += r.inputTokens;
     outTok += r.outputTokens;
     cost += r.costUsd;
+    cacheRead += r.cacheRead ?? 0;
 
     for (const it of r.data?.items ?? []) {
       if (!it?.title?.trim()) continue;
@@ -659,6 +665,7 @@ async function runPipeline(
     inTok += st.inputTokens;
     outTok += st.outputTokens;
     cost += st.costUsd;
+    cacheRead += st.cacheRead ?? 0;
 
     const byIdx = new Map<number, number | null>();
     for (const p of st.data?.placements ?? []) {
@@ -674,14 +681,18 @@ async function runPipeline(
       confidence: 0.9,
     }));
   } else {
+    // Daraxt keshlanadigan prefiksga, bandlar o'zgaruvchi qismga. Ketma-ket
+    // synclarda daraxt deyarli bir xil qoladi -> kesh hit -> input narxi 10x
+    // arzon. Model ko'radigan matn o'zgarmaydi.
     const b = await callJson<{ placements: Placement[] }>(
       PASS_B_SYSTEM,
-      passBUser(tree, items.map((it, i) => ({ i, title: it.title, hint: it.parent_hint }))),
-      { apiKey, maxTokens: 4000 },
+      passBItemsBlock(items.map((it, i) => ({ i, title: it.title, hint: it.parent_hint }))),
+      { apiKey, maxTokens: 4000, cachedPrefix: passBTreeBlock(tree) },
     );
     inTok += b.inputTokens;
     outTok += b.outputTokens;
     cost += b.costUsd;
+    cacheRead += b.cacheRead ?? 0;
 
     if (b.error || !b.data?.placements) {
       // Pass B yiqilsa hammasini yangi qilib yubormaymiz — bu dublikat yasaydi.
@@ -727,6 +738,7 @@ async function runPipeline(
   for (const p of placements) byIndex.set(p.item_index, p);
 
   const ops: Record<string, unknown>[] = [];
+  const reopens: { node: string; status: string }[] = [];
 
   items.forEach((it, i) => {
     const p = byIndex.get(i);
@@ -738,6 +750,13 @@ async function runPipeline(
     );
 
     if (p.decision === "match" && p.node_id) {
+      // Oshkora qayta ochish: qo'riqchi (0013) oddiy set_status'dagi
+      // done->ochiq ni bloklaydi. Model matnda aniq "qayta ochildi" deganda
+      // reopened=true keladi va bu tugun cm_reopen orqali ochiladi.
+      if (it.reopened === true && it.status &&
+          ["todo", "in_progress", "blocked"].includes(it.status)) {
+        reopens.push({ node: p.node_id, status: it.status });
+      }
       // Mavjud tugun. Status o'zgargan bo'lsa set_status, aks holda faqat
       // xulosani boyitish uchun annotate. Ilgari status yo'q bo'lsa op umuman
       // yaratilmasdi va yangi kelgan xulosa yo'qolib ketardi.
@@ -748,7 +767,7 @@ async function runPipeline(
         node_id: p.node_id,
         title: it.title,
         confidence: conf,
-        note: it.note?.slice(0, 800),
+        note: it.note?.slice(0, 320),
         evidence: it.evidence?.slice(0, 200),
         evidence_message_id: it.evidence_message_id ?? null,
       };
@@ -768,7 +787,7 @@ async function runPipeline(
         type: guessType(it),
         status: it.status ?? "todo",
         confidence: conf,
-        note: it.note?.slice(0, 800),
+        note: it.note?.slice(0, 320),
         evidence: it.evidence?.slice(0, 200),
         evidence_message_id: it.evidence_message_id ?? null,
       });
@@ -788,6 +807,21 @@ async function runPipeline(
   });
 
   const r = applied.data?.[0] ?? { applied: 0, skipped: 0, ghosts: 0, expired: 0 };
+
+  // Oshkora qayta ochishlar — qo'riqchi ruxsatli yo'li orqali
+  for (const ro of reopens) {
+    await rpc(db, "reopen", { p_node: ro.node, p_status: ro.status });
+  }
+
+  // Qo'riqchi nimani BLOKLAGANini o'qiymiz. Bu jim bo'lishi mumkin emas:
+  // "nothing left behind" degan kvitansiya bloklangan urinishni ham aytsin.
+  const blockedEv = await db.select<{ payload: { seq?: number; title?: string } }>(
+    `node_events?select=payload&project_id=eq.${s.out_project_id}` +
+    `&op=eq.reopen_blocked&created_at=gte.${new Date(started).toISOString()}`,
+  );
+  const reopensBlocked = blockedEv
+    .map((e) => ({ seq: e.payload?.seq ?? null, title: e.payload?.title ?? "" }))
+    .filter((x) => x.title);
 
   await logRun(db, s, {
     trigger: "stop_hook",
@@ -841,6 +875,7 @@ async function runPipeline(
       inTok += g.inputTokens;
       outTok += g.outputTokens;
       cost += g.costUsd;
+      cacheRead += g.cacheRead ?? 0;
 
       if (g.data) {
         const sm2 = await rpc<Record<string, string>>(db, "seq_map", {
@@ -890,17 +925,24 @@ async function runPipeline(
   // qaytadi: jim muvaffaqiyatdan ko'ra ko'rinadigan kamchilik yaxshiroq.
   const receipt = {
     captured: r.applied,
+    // Kesh ishlayaptimi — buni ko'rish uchun logga chiqadi. cache_read 0 bo'lib
+    // qolsa demak prefiks har safar o'zgaryapti va tejash yo'q.
+    cache_read: cacheRead,
     updated: ops.length - (r.applied ?? 0) + (r.skipped ?? 0),
     recovered,
     merged: merged.duplicates,
     chunks: chunks.length,
     unaccounted: uncaptured.length,
+    reopens_blocked: reopensBlocked.length,
   };
   const line = `${receipt.captured} captured · ${recovered} recovered · ` +
     (uncaptured.length === 0
       ? "nothing left behind"
       : `${uncaptured.length} line(s) unaccounted`) +
-    (tidied ? ` · tree tidied: ${tidied.moved} moved, ${tidied.merged} merged` : "");
+    (tidied ? ` · tree tidied: ${tidied.moved} moved, ${tidied.merged} merged` : "") +
+    (reopensBlocked.length
+      ? ` · ${reopensBlocked.length} reopen(s) blocked`
+      : "");
 
   return json({
     ok: true,
@@ -912,6 +954,7 @@ async function runPipeline(
     items: items.length,
     cursor: maxSeq,
     uncaptured,
+    reopens_blocked: reopensBlocked,
     receipt,
     receipt_line: line,
     tree: (finalTree.data ?? "").trim(),

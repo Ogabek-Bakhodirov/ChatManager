@@ -13,7 +13,7 @@
 // ============================================================================
 
 const PROTOCOL_VERSION = "2025-06-18";
-const SERVER_VERSION = "0.12.0";
+const SERVER_VERSION = "0.13.0";
 
 interface RpcReq {
   jsonrpc: string;
@@ -595,6 +595,20 @@ Deno.serve(async (req: Request) => {
         : "";
 
       // Audit Y5: "0 o'zgarish" muvaffaqiyat kabi ko'rinmasin
+      // 0013 qo'riqchisi bloklagan qayta ochishlar. Jim qolishi mumkin emas:
+      // foydalanuvchi chindan qayta ochgan bo'lsa, model buni oshkora aytishi
+      // kerak — aks holda esa bu noto'g'ri extraction'ning ushlangan holati.
+      const rb = Array.isArray(r.body.reopens_blocked)
+        ? (r.body.reopens_blocked as { seq?: number; title?: string }[])
+        : [];
+      const rbBlock = rb.length
+        ? `\n\n⚠️ BLOCKED: an attempt to reopen finished work was rejected — ` +
+          rb.map((x) => `#${x.seq} ${x.title}`).join(", ") +
+          `.\nIf the user really reopened it, resend with explicit wording ` +
+          `("reopening #N because ..."). Otherwise this was a bad extraction ` +
+          `and the guard just saved the tree — no action needed.`
+        : "";
+
       const noItemsBlock = r.body.note === "no_items"
         ? `\n\n⚠️ The server could not extract a single item from the text (in two attempts). ` +
           (typeof r.body.hint === "string" ? r.body.hint : "")
@@ -630,7 +644,7 @@ Deno.serve(async (req: Request) => {
           (Number(gapBefore) >= 45
             ? `\n\n(closed a ${gapBefore}-minute gap)`
             : "") +
-          skippedBlock + noItemsBlock + uncBlock +
+          skippedBlock + noItemsBlock + uncBlock + rbBlock +
           (prevErr
             ? `\n\n⚠️ Note: the PREVIOUS sync ended with an error (${prevErr}). ` +
               `If that period's work is missing from the tree, send it too.`

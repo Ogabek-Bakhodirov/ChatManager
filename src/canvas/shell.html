@@ -512,6 +512,32 @@ button.danger[disabled] { opacity: .45; filter: none; }
 .chip.s-done        { background: var(--done-fill);   color: var(--done-ink); }
 .chip.s-blocked     { background: var(--block-fill);  color: var(--block-ink); }
 .chip.s-cancelled   { background: var(--cancel-fill); color: var(--cancel-ink); }
+
+/* Bosiladigan status chipi (0014 — qo'lda tuzatish) --------------------
+   Extraction xato qilsa, odam uni shu yerdan to'g'irlaydi. Faqat status
+   chipi interaktiv; Milestone/Guess/Has open work — statik. */
+.chip[data-status] {
+  cursor: pointer; display: inline-flex; align-items: center; gap: 4px;
+  border: 1px solid transparent; transition: border-color .14s;
+}
+.chip[data-status]:hover { border-color: currentColor; }
+.chip[data-status]::after {
+  content: ""; width: 0; height: 0; margin-left: 1px;
+  border-left: 3px solid transparent; border-right: 3px solid transparent;
+  border-top: 3.5px solid currentColor; opacity: .55;
+}
+
+/* Status tanlagichi — .pmenu ustiga qo'shimcha */
+.pmenu .sw { width: 9px; height: 9px; border-radius: 3px; flex: none; margin: 0 2px; }
+.pmenu .mi .tick { margin-left: auto; color: var(--accent); opacity: 0; }
+.pmenu .mi.picked .tick { opacity: 1; }
+.pmenu .mi.picked .lb { color: var(--text); font-weight: 550; }
+.sw-todo { background: var(--todo); }
+.sw-in_progress { background: var(--prog); }
+.sw-done { background: var(--done); }
+.sw-blocked { background: var(--block); }
+.sw-cancelled { background: var(--cancel); }
+
 .src { width: 7px; height: 7px; border-radius: 2px; background: var(--edge); margin-left: auto; }
 
 .zoom {

@@ -365,6 +365,8 @@ const DEMO_EVENTS = [
 
 /* ====================================================================== */
 
+const STATUS_ORDER = ["todo", "in_progress", "done", "blocked", "cancelled"];
+
 const STATUS_EN = {
   todo: "To do", in_progress: "In progress", done: "Done",
   blocked: "Blocked", cancelled: "Cancelled",
@@ -387,7 +389,7 @@ function timeAgo(iso) {
   return Math.round(s / 86400) + "d ago";
 }
 
-function Node({ n, x, y, selected, fresh, onClick }) {
+function Node({ n, x, y, selected, fresh, onClick, onStatus }) {
   // Loyiha tuguni: bosilmaydi, statusi yo'q — u ish emas, sarlavha.
   if (n.synthetic) {
     return html`
@@ -408,7 +410,12 @@ function Node({ n, x, y, selected, fresh, onClick }) {
     <div class=${cls} style=${{ left: x + "px", top: y + "px" }} onClick=${() => onClick(n)}>
       <div class="n-title" title=${n.title ?? ""}>${n.title}</div>
       <div class="n-meta">
-        <span class=${"chip s-" + n.status}>${STATUS_EN[n.status] ?? n.status}</span>
+        <span class=${"chip s-" + n.status}
+              data-status=${onStatus ? n.status : undefined}
+              title=${onStatus ? "Change status" : undefined}
+              onClick=${onStatus
+                ? (e) => { e.stopPropagation(); onStatus(n, e.currentTarget.getBoundingClientRect()); }
+                : undefined}>${STATUS_EN[n.status] ?? n.status}</span>
         ${n.type === "milestone" ? html`<span class="chip">Milestone</span>` : null}
         ${n.is_ghost ? html`<span class="chip">Guess</span>` : null}
         ${n.ctx ? html`<span class="chip">Has open work</span>` : null}
@@ -416,7 +423,7 @@ function Node({ n, x, y, selected, fresh, onClick }) {
     </div>`;
 }
 
-function Canvas({ nodes, selected, onSelect, freshIds, hiddenCount = 0 }) {
+function Canvas({ nodes, selected, onSelect, freshIds, hiddenCount = 0, onStatus }) {
   const stage = useRef(null);
   const [view, setView] = useState({ x: 60, y: 40, k: 1 });
   // Gesture eslatmasi faqat birinchi tashrifda. Har safar chiqsa u yuqoridagi
@@ -539,7 +546,7 @@ function Canvas({ nodes, selected, onSelect, freshIds, hiddenCount = 0 }) {
           if (!p) return null;
           return html`<${Node} key=${n.id} n=${n} x=${p.x} y=${p.y}
                         selected=${selected?.id === n.id} fresh=${freshIds.has(n.id)}
-                        onClick=${onSelect} />`;
+                        onClick=${onSelect} onStatus=${onStatus} />`;
         })}
       </div>
 
@@ -625,7 +632,8 @@ function Menu({ title, items, pos, onClose }) {
     <div class="pmenu" style=${{
       top: pos.top != null ? pos.top + "px" : undefined,
       bottom: pos.bottom != null ? pos.bottom + "px" : undefined,
-      right: pos.right + "px",
+      right: pos.right != null ? pos.right + "px" : undefined,
+      left: pos.left != null ? pos.left + "px" : undefined,
     }}>
       ${title ? html`<div class="mhead">${title}</div>` : null}
       ${items.map((it, i) => it.div
@@ -633,11 +641,12 @@ function Menu({ title, items, pos, onClose }) {
         : html`
           <button key=${it.k ?? i}
                   class=${"mi" + (it.danger ? " danger" : "") + (it.soon ? " soon" : "")
+                         + (it.picked ? " picked" : "")
                          + (cur === i && !it.soon ? " cur" : "")}
                   disabled=${!!it.soon}
                   onMouseEnter=${() => { if (!it.soon) setCur(i); }}
                   onClick=${() => { if (it.run) { onClose(); it.run(); } }}>
-            <${Icon} n=${it.icon} />
+            ${it.sw ? html`<span class=${"sw sw-" + it.sw}></span>` : html`<${Icon} n=${it.icon} />`}
             <span class="lbl">${it.label}</span>
             <span class="k">${it.soon ? "Soon" : it.k}</span>
           </button>`)}
@@ -1197,6 +1206,73 @@ function App() {
   const freshIds = useRef(new Set());
   const [, bump] = useState(0);
 
+  // ---------------------------------------------------------- qo'lda status --
+  // Extraction xato qilsa, odam uni shu yerdan to'g'irlaydi. Bu "valid data"
+  // maqsadining birinchi sharti: avtomatik tizim adashsa, tuzatib bo'ladigan
+  // yo'l bo'lishi kerak.
+  //
+  // Yozish `node_set_status` RPC orqali (0014): u a'zolikni tekshiradi,
+  // done->ochiq o'tishni OSHKORA qayta ochish deb belgilaydi (0013 qo'riqchisi
+  // faqat avtomatik extraction'ni to'xtatadi) va node_events ga actor='user'
+  // yozadi — Activity oqimida kim o'zgartirgani ko'rinadi.
+  const [statusMenu, setStatusMenu] = useState(null);   // { node, pos }
+
+  const openStatusMenu = useCallback((n, rect) => {
+    if (n.synthetic) return;                            // loyiha ildizi — statusi yo'q
+    setStatusMenu({
+      node: n,
+      pos: {
+        left: Math.max(10, Math.min(rect.left, window.innerWidth - 210)),
+        top: rect.bottom + 6 + 210 > window.innerHeight ? undefined : rect.bottom + 6,
+        bottom: rect.bottom + 6 + 210 > window.innerHeight
+          ? window.innerHeight - rect.top + 6 : undefined,
+      },
+    });
+  }, []);
+
+  const setNodeStatus = useCallback(async (node, status) => {
+    if (!node || node.status === status) return;
+    if (demo) {
+      setNodes((cur) => cur.map((x) => (x.id === node.id ? { ...x, status } : x)));
+      markFresh([node.id]);
+      say(`"${node.title}" → ${STATUS_EN[status]}`);
+      return;
+    }
+
+    // Optimistik: darhol ko'rinadi. Xato bo'lsa qaytaramiz — jim qolmaymiz.
+    const before = node.status;
+    setNodes((cur) => cur.map((x) => (x.id === node.id ? { ...x, status, is_ghost: false } : x)));
+    markFresh([node.id]);
+
+    const { data, error } = await sb.rpc("node_set_status", {
+      p_node: node.id, p_status: status,
+    });
+    if (error) {
+      setNodes((cur) => cur.map((x) => (x.id === node.id ? { ...x, status: before } : x)));
+      say("Could not change status: " + error.message);
+      return;
+    }
+    const row = Array.isArray(data) ? data[0] : data;
+    say(row?.out_reopened
+      ? `"${node.title}" reopened → ${STATUS_EN[status]}`
+      : `"${node.title}" → ${STATUS_EN[status]}`);
+    loadProject(activeId);      // Activity oqimi yangilansin
+  }, [demo, sb, activeId]);
+
+  // 1-5 klavishlari: tanlangan tugun statusini tez o'zgartirish
+  useEffect(() => {
+    const onKey = (e) => {
+      if (!selected || statusMenu) return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (/^(INPUT|TEXTAREA)$/.test(document.activeElement?.tagName ?? "")) return;
+      if (!/^[1-5]$/.test(e.key)) return;
+      e.preventDefault();
+      setNodeStatus(selected, STATUS_ORDER[+e.key - 1]);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [selected, statusMenu, setNodeStatus]);
+
   const markFresh = (ids) => {
     ids.forEach((id) => freshIds.current.add(id));
     bump((x) => x + 1);
@@ -1542,7 +1618,8 @@ function App() {
                      onSignOut=${signOut} onRefresh=${() => load(sb)} />
         <${Canvas} key=${activeId + ":" + (hideDone ? "1" : "0") + ":" + activeName}
                    nodes=${shown} selected=${selected} onSelect=${setSelected}
-                   freshIds=${freshIds.current} hiddenCount=${hidden} />
+                   freshIds=${freshIds.current} hiddenCount=${hidden}
+                   onStatus=${openStatusMenu} />
         <${Side} selected=${selected} events=${events} chats=${chats}
                  loading=${loading || treeLoading}
                  open=${rightOpen} onToggle=${setRightOpen}
@@ -1554,6 +1631,18 @@ function App() {
         ? html`<${DeleteDialog} project=${deleting} onCancel=${() => setDeleting(null)}
                  onConfirm=${() => deleteProject(deleting)} />`
         : null}
+
+      ${statusMenu ? html`
+        <${Menu} title="Set status"
+                 pos=${statusMenu.pos}
+                 onClose=${() => setStatusMenu(null)}
+                 items=${STATUS_ORDER.map((st, i) => ({
+                   k: String(i + 1),
+                   sw: st,
+                   label: STATUS_EN[st],
+                   picked: statusMenu.node.status === st,
+                   run: () => setNodeStatus(statusMenu.node, st),
+                 }))} />` : null}
 
       <div class=${"toast" + (toast ? " show" : "")}>
         <span class="ok"><${Icon} n="check" /></span>${toast ?? ""}

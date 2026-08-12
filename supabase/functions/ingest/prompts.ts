@@ -14,8 +14,23 @@ Something a person built, fixed, tested, wrote, decided to build, or discovered 
 Examples: writing a file, applying a migration, fixing a bug, running a test suite,
 rewriting something that was wrong, adding a new check.
 
-Not work items: questions, explanations of how something works, background context,
-options being compared, greetings, praise.
+Not work items — be strict about these, they are the main source of junk:
+
+- Questions, explanations, background context, options being compared, greetings.
+- **Talk about the work rather than the work.** "We agreed the benchmark matters",
+  "confirmed the architecture decision", "the user thinks we're going in circles",
+  "this approach is cheaper" — these are conclusions from a discussion. The work is
+  whatever gets BUILT because of them, if anything.
+- **Observations and test readings.** "The nodes stayed done", "the tree shrank to 72
+  lines", "cost is now $3/month" — results, not tasks. If a check was performed,
+  the item is the check ("Run the guard test"), not what it showed.
+- **Anything already visible in the task tree.** Restating status, quoting a node,
+  or summarizing what is already tracked is never a new item.
+- **Meta-feedback about this tool** — complaints, praise, or plans about how to use
+  the tracker itself.
+
+Test: could someone open this item tomorrow and DO it? If it is a sentence about
+something that already happened or was concluded, it is not an item.
 
 ## Status
 
@@ -29,11 +44,15 @@ options being compared, greetings, praise.
 
 {"items":[{"title":"<=60 chars, imperative, SAME LANGUAGE AS THE MESSAGES",
            "status":"done|in_progress|todo|cancelled",
-           "note":"2-3 sentences, <=600 chars, SAME LANGUAGE AS THE MESSAGES",
+           "note":"1-2 sentences, <=300 chars, SAME LANGUAGE AS THE MESSAGES",
            "parent_hint":"short phrase naming the bigger thing this belongs to, or null",
            "confidence":0.0-1.0,
+           "reopened":false,
            "evidence":"<=200 char quote",
            "evidence_message_id":"the id of the message the quote came from"}]}
+
+\`reopened\` is true ONLY when the messages explicitly say previously finished work
+was reopened or found broken. Omit it otherwise.
 
 ## \`note\` — what makes this item recallable weeks later
 
@@ -41,7 +60,8 @@ The title is a label. The note is the memory. Someone opening this months from n
 with no access to the conversation, must be able to read the note and know where things
 stood without re-reading anything.
 
-Write 2-3 sentences covering whichever of these the messages actually contain:
+Write **at most two sentences**, and stay under 300 characters. Cover whichever of
+these the messages actually contain — the most load-bearing ones first:
 
 - **What was decided or done**, concretely. Names, numbers, versions, file names.
 - **Why** — the reasoning, the constraint, the thing that was ruled out.
@@ -56,6 +76,10 @@ Do not restate the title. Do not speculate about anything the messages do not sa
 messages genuinely contain nothing beyond the title, write one honest sentence of context
 rather than padding — but that should be rare, because conversations almost always carry
 the reasoning along with the work.
+
+Length is a hard constraint, not a suggestion. The example above is 229 characters and
+loses nothing. Every character past that is paid for on every single item, so compress:
+drop filler, keep names, numbers and the reason.
 
 ## Phases and granularity — this shapes the whole tree
 
@@ -104,6 +128,13 @@ the task closed.
 status done. "Deploy bloklandi, sertifikat kutilmoqda" -> item, status blocked.
 The sentence being short, past-tense, or at the START of a message changes nothing.
 
+**NEVER downgrade.** Messages often MENTION finished work while planning, quoting
+the tree, or summarizing history ("earlier we built X", "#4 [done] F0 baza", "next
+after the parser"). That is a reference, not a status change — do not emit todo or
+in_progress for it. Emit an open status for previously finished work ONLY when the
+messages explicitly say it was reopened, reverted, or found broken — and then also
+set \`"reopened": true\` on that item.
+
 ## Decisions that were MADE are work items
 
 A decision that has been settled is work to be done, not discussion:
@@ -112,8 +143,12 @@ A decision that has been settled is work to be done, not discussion:
 
 Only options still being weighed are excluded. Once one is chosen, it is an item.
 
-Be thorough. If the messages describe eight distinct pieces of work, return eight items.
-Missing real work is a worse error than listing something borderline.
+Be thorough about real work: if the messages describe eight distinct pieces of work,
+return eight items.
+
+But thoroughness is not padding. Missing real work is bad; so is filling the tree with
+sentences that are not work. When an item fails the "could someone DO it tomorrow" test,
+leave it out — do not lower it to a guess.
 
 **Language is not optional.** Write every title and parent_hint in the same language the
 conversation is written in. If the messages are in Uzbek, the titles must be in Uzbek — even
@@ -231,15 +266,21 @@ Rules:
 - One item per gap, no extras, no duplicates of work already covered.
 - If a gap is an identifier, put it at the START of the title: "T3 — taste qadamini qo'shish".
 - Same language as the messages.
-- **Default is INCLUDE.** The check is usually right. Treat every flagged line as real
-  work unless it is clearly a greeting, a question, or an option that was explicitly
-  rejected. When unsure, include it: a borderline extra item is cheap and visible,
-  a lost one is silent and permanent. An empty list should be rare.
+- **Lean INCLUDE for real work.** The check is usually right about work: when a flagged
+  line names something built, fixed, tested, decided-to-build or blocked, include it.
+  A lost item is silent and permanent, a borderline one is visible.
+- **But the check cannot tell work from talk.** It flags any line that looks
+  work-shaped. Exclude flagged lines that are: greetings or questions; conclusions
+  from a discussion ("we agreed X", "confirmed Y"); observations or test readings
+  ("it stayed done", "cost dropped to $3"); restatements of the existing tree; or
+  feedback about the tracker itself.
+- Same test as before: could someone open it tomorrow and DO it? If not, skip it.
+  An empty list is a valid answer when every flagged line was talk.
 - A flagged line that reports existing work finished/blocked is an item with that
   status — not a summary to skip.
 
-Output the same shape as before, including \`note\` — 2-3 sentences saying what was
-decided or done and why, in the language of the messages:
+Output the same shape as before, including \`note\` — at most two sentences (<=300
+chars) saying what was decided or done and why, in the language of the messages:
 {"items":[{"title":"...","status":"done|in_progress|todo|cancelled","note":"...",
            "parent_hint":"...","confidence":0.0-1.0,"evidence":"<=200 char quote",
            "evidence_message_id":"..."}]}
@@ -268,10 +309,24 @@ export function passAUser(delta: string): string {
   return `## Messages\n\n\`\`\`\n${delta}\n\`\`\``;
 }
 
-export function passBUser(tree: string, items: unknown[]): string {
-  return `## Existing tree\n\n\`\`\`\n${tree}\n\`\`\`\n\n## Items to place\n\n\`\`\`json\n${
+// Pass B kirishi ikkiga bo'linadi, chunki prompt caching PREFIKS bo'yicha
+// ishlaydi: faqat xabar boshidagi o'zgarmagan qism keshdan o'qiladi.
+//   · daraxt      — synclar orasida arang o'zgaradi  -> keshlanadi
+//   · bandlar     — har safar yangi                  -> keshlanmaydi
+// Ikkisi qo'shilganda matn avvalgidek ko'rinadi, ya'ni prompt o'zgarmaydi.
+export function passBTreeBlock(tree: string): string {
+  return `## Existing tree\n\n\`\`\`\n${tree}\n\`\`\``;
+}
+
+export function passBItemsBlock(items: unknown[]): string {
+  return `## Items to place\n\n\`\`\`json\n${
     JSON.stringify(items, null, 1)
   }\n\`\`\``;
+}
+
+/** Keshsiz yo'l uchun (test va zaxira) — ikkala blok birga. */
+export function passBUser(tree: string, items: unknown[]): string {
+  return `${passBTreeBlock(tree)}\n\n${passBItemsBlock(items)}`;
 }
 
 // Gardener — daraxtni davriy butash. Sync'dan MUTLAQO ajralgan: kirish faqat

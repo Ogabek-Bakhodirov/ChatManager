@@ -79,10 +79,35 @@ export function prefilter(delta: string): PrefilterResult {
  * token'ni ko'p yeydi. Signal qidirishdan oldin ham, LLM'ga yuborishdan oldin
  * ham kesamiz.
  */
+/** `  #42 [done] Sarlavha` — bizning O'Z daraxt chiqishimiz. */
+const TREE_LINE = /^[ \t]*#\d{1,6}\s*\[(todo|in_progress|done|blocked|cancelled)[^\]]*\]\s.*$/gm;
+
+/** `18 captured · 2 recovered · nothing left behind` — bizning kvitansiyamiz. */
+const RECEIPT_LINE =
+  /^.*\b\d+\s+captured\b.*$|^.*\bnothing left behind\b.*$|^.*\btree tidied\b.*$|^.*\breopen\(s\) blocked\b.*$/gm;
+
+/** `chat_ref: chat_xxxx — ...` */
+const REF_LINE = /^.*chat_ref:\s*chat_[a-z0-9]+.*$/gm;
+
 export function stripNoise(text: string): string {
   return text
     // ```...``` bloklari -> qisqa belgi
     .replace(/```[\s\S]*?```/g, " [kod] ")
+
+    // TIZIMNING O'Z CHIQISHI — extraction'ga kirmasligi SHART.
+    //
+    // Jonli nosozlik: sync matnida daraxt dumpi bo'lgani uchun model
+    // "#4 [done] F0 baza" qatorini YANGI ish deb o'qidi, keyin uni todo'ga
+    // qaytardi. Bundan tashqari kvitansiya qatorlari ("nothing left behind")
+    // ham tugun bo'lib daraxtga tushdi.
+    //
+    // Bu qatorlar suhbat emas — ular bizning javobimiz. Ularni extraction
+    // ko'rmasligi kerak. Prompt bilan emas, MANBADA kesamiz: model qoidani
+    // buzishi mumkin, regexp buzmaydi.
+    .replace(TREE_LINE, "")
+    .replace(RECEIPT_LINE, "")
+    .replace(REF_LINE, "")
+
     // juda uzun bir qatorli chiqishlar (base64, log)
     .replace(/^.{600,}$/gm, " [uzun chiqish] ")
     .replace(/\n{3,}/g, "\n\n")
