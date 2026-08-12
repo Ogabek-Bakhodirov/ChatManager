@@ -407,7 +407,12 @@ function Node({ n, x, y, selected, fresh, onClick, onStatus }) {
     selected ? "sel" : "", fresh ? "fresh" : "",
   ].filter(Boolean).join(" ");
   return html`
-    <div class=${cls} style=${{ left: x + "px", top: y + "px" }} onClick=${() => onClick(n)}>
+    <div class=${cls} style=${{ left: x + "px", top: y + "px" }}
+         onClick=${() => onClick(n)}
+         onContextMenu=${onStatus
+           ? (e) => { e.preventDefault(); onClick(n);
+                      onStatus(n, e.currentTarget.getBoundingClientRect(), true); }
+           : undefined}>
       <div class="n-title" title=${n.title ?? ""}>${n.title}</div>
       <div class="n-meta">
         <span class=${"chip s-" + n.status}
@@ -1144,6 +1149,29 @@ function Gate({ onReady, initial, theme, onTheme }) {
 /* O'chirish qaytarib bo'lmaydi: `projects` dan cascade bilan tugunlar,
    chat sessiyalari va tokenlar ham o'chadi. Shuning uchun nomni yozib
    tasdiqlash talab qilinadi — tasodifiy bosishdan himoya. */
+// Kaskad o'chirish tasdig'i. Oddiy o'chirishda bu oyna chiqmaydi — u bolalarni
+// yo'qotmaydi, ya'ni qaytarib bo'lmaydigan zarar yo'q. Kaskad esa boshqa gap.
+function DeleteNodeDialog({ node, kids, onCancel, onConfirm }) {
+  return html`
+    <div class="modal" onClick=${onCancel}>
+      <div class="box" onClick=${(e) => e.stopPropagation()}>
+        <h2>Delete "${node.title}" and everything under it?</h2>
+        <div class="warn">
+          This removes <b>${kids + 1} node${kids ? "s" : ""}</b> — the item and all
+          ${kids} subtask${kids === 1 ? "" : "s"}. It cannot be undone.
+          <br /><br />
+          Loosend will not recreate them from later syncs.
+        </div>
+        <div class="row">
+          <button onClick=${onCancel}>Cancel</button>
+          <button class="danger" onClick=${onConfirm}>
+            Delete ${kids + 1} nodes
+          </button>
+        </div>
+      </div>
+    </div>`;
+}
+
 function DeleteDialog({ project, onCancel, onConfirm }) {
   const [typed, setTyped] = useState("");
   const [busy, setBusy] = useState(false);
@@ -1217,14 +1245,15 @@ function App() {
   // yozadi — Activity oqimida kim o'zgartirgani ko'rinadi.
   const [statusMenu, setStatusMenu] = useState(null);   // { node, pos }
 
-  const openStatusMenu = useCallback((n, rect) => {
+  const openStatusMenu = useCallback((n, rect, full = false) => {
     if (n.synthetic) return;                            // loyiha ildizi — statusi yo'q
     setStatusMenu({
       node: n,
+      full,                                             // o'ng tugma: o'chirish ham
       pos: {
         left: Math.max(10, Math.min(rect.left, window.innerWidth - 210)),
-        top: rect.bottom + 6 + 210 > window.innerHeight ? undefined : rect.bottom + 6,
-        bottom: rect.bottom + 6 + 210 > window.innerHeight
+        top: rect.bottom + 6 + 260 > window.innerHeight ? undefined : rect.bottom + 6,
+        bottom: rect.bottom + 6 + 260 > window.innerHeight
           ? window.innerHeight - rect.top + 6 : undefined,
       },
     });
@@ -1257,6 +1286,50 @@ function App() {
       ? `"${node.title}" reopened → ${STATUS_EN[status]}`
       : `"${node.title}" → ${STATUS_EN[status]}`);
     loadProject(activeId);      // Activity oqimi yangilansin
+  }, [demo, sb, activeId]);
+
+  // ------------------------------------------------------------ o'chirish --
+  // Ikkita rejim, ikkalasi ham menyuda ko'rinadi:
+  //   · "Delete"                 — bolalar YO'QOLMAYDI, bobosining ostiga chiqadi
+  //   · "Delete with N subtasks" — butun shox (xavfli, alohida qator)
+  // Server (0015) o'chirilgan kalitga qabr toshi qo'yadi, shuning uchun
+  // keyingi sync uni QAYTA YARATMAYDI. Busiz o'chirish ma'nosiz bo'lardi.
+  const [confirmDel, setConfirmDel] = useState(null);   // { node, cascade, kids }
+
+  const deleteNode = useCallback(async (node, cascade) => {
+    setConfirmDel(null);
+    if (demo) {
+      setNodes((cur) => {
+        const kids = cur.filter((x) => x.parent_id === node.id).map((x) => x.id);
+        if (cascade) {
+          const gone = new Set([node.id]);
+          let grew = true;
+          while (grew) {
+            grew = false;
+            for (const x of cur) {
+              if (!gone.has(x.id) && x.parent_id && gone.has(x.parent_id)) { gone.add(x.id); grew = true; }
+            }
+          }
+          return cur.filter((x) => !gone.has(x.id));
+        }
+        return cur.filter((x) => x.id !== node.id)
+                  .map((x) => (kids.includes(x.id) ? { ...x, parent_id: node.parent_id } : x));
+      });
+      setSelected(null);
+      say(`"${node.title}" deleted`);
+      return;
+    }
+
+    const { data, error } = await sb.rpc("node_delete", {
+      p_node: node.id, p_cascade: !!cascade,
+    });
+    if (error) { say("Could not delete: " + error.message); return; }
+    const row = Array.isArray(data) ? data[0] : data;
+    setSelected(null);
+    say(row?.out_promoted
+      ? `"${node.title}" deleted · ${row.out_promoted} subtask(s) moved up`
+      : `"${node.title}" deleted`);
+    loadProject(activeId);
   }, [demo, sb, activeId]);
 
   // 1-5 klavishlari: tanlangan tugun statusini tez o'zgartirish
@@ -1636,13 +1709,35 @@ function App() {
         <${Menu} title="Set status"
                  pos=${statusMenu.pos}
                  onClose=${() => setStatusMenu(null)}
-                 items=${STATUS_ORDER.map((st, i) => ({
-                   k: String(i + 1),
-                   sw: st,
-                   label: STATUS_EN[st],
-                   picked: statusMenu.node.status === st,
-                   run: () => setNodeStatus(statusMenu.node, st),
-                 }))} />` : null}
+                 items=${[
+                   ...STATUS_ORDER.map((st, i) => ({
+                     k: String(i + 1),
+                     sw: st,
+                     label: STATUS_EN[st],
+                     picked: statusMenu.node.status === st,
+                     run: () => setNodeStatus(statusMenu.node, st),
+                   })),
+                   ...(statusMenu.full ? (() => {
+                     const node = statusMenu.node;
+                     const kids = nodes.filter((x) => x.parent_id === node.id).length;
+                     const out = [{ div: true }, {
+                       k: "D", icon: "trash", label: "Delete", danger: true,
+                       run: () => deleteNode(node, false),
+                     }];
+                     if (kids) out.push({
+                       k: "A", icon: "trash", danger: true,
+                       label: `Delete with ${kids} subtask${kids === 1 ? "" : "s"}`,
+                       run: () => setConfirmDel({ node, kids }),
+                     });
+                     return out;
+                   })() : []),
+                 ]} />` : null}
+
+      ${confirmDel
+        ? html`<${DeleteNodeDialog} node=${confirmDel.node} kids=${confirmDel.kids}
+                 onCancel=${() => setConfirmDel(null)}
+                 onConfirm=${() => deleteNode(confirmDel.node, true)} />`
+        : null}
 
       <div class=${"toast" + (toast ? " show" : "")}>
         <span class="ok"><${Icon} n="check" /></span>${toast ?? ""}
