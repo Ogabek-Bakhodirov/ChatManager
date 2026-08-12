@@ -527,6 +527,37 @@ button.danger[disabled] { opacity: .45; filter: none; }
   border-top: 3.5px solid currentColor; opacity: .55;
 }
 
+/* Ta'rif qalqonchasi (0016) --------------------------------------------
+   "blocked" va "cancelled" nomlari o'z-o'zidan tushunarli emas. Native
+   `title=` sekin (~1s) va uslubsiz — o'zimiznikini chizamiz. Hover 350ms
+   dan keyin chiqadi: sichqoncha shunchaki o'tib ketsa bezovta qilmasin. */
+.chip.tip { position: relative; }
+.chip.tip::before {
+  content: attr(data-tip);
+  position: absolute; left: 50%; bottom: calc(100% + 7px);
+  transform: translateX(-50%);
+  width: max-content; max-width: 210px;
+  padding: 6px 9px; border-radius: 7px;
+  background: var(--tip-bg, #1b1d21); color: #f2f3f5;
+  font-size: 11px; font-weight: 450; line-height: 1.35;
+  letter-spacing: 0; text-transform: none; text-align: left;
+  white-space: normal; box-shadow: var(--shadow-md);
+  opacity: 0; pointer-events: none; z-index: 60;
+  transition: opacity .12s .35s;
+}
+.chip.tip:hover::before { opacity: 1; }
+.chip.guess { border: 1px dashed var(--faint); }
+.chip.guess.act { cursor: pointer; }
+.chip.guess.act:hover { border-style: solid; border-color: var(--accent); color: var(--accent); }
+
+/* Menyudagi ta'rif qatori: tanlangan qatorga qarab o'zgaradi. */
+.pmenu .mhint {
+  margin: 4px 4px 0; padding: 7px 8px 6px;
+  border-top: 1px solid var(--line-soft);
+  font-size: 11px; line-height: 1.4; color: var(--muted); white-space: normal;
+  max-width: 210px;
+}
+
 /* Status tanlagichi — .pmenu ustiga qo'shimcha */
 .pmenu .sw { width: 9px; height: 9px; border-radius: 3px; flex: none; margin: 0 2px; }
 .pmenu .mi .tick { margin-left: auto; color: var(--accent); opacity: 0; }

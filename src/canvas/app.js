@@ -374,10 +374,24 @@ const STATUS_EN = {
 const OP_EN = {
   add_node: "added", set_status: "status", rename: "renamed",
   move: "moved", delete: "deleted", ghost_expired: "guess expired", merge: "merged",
+  confirm: "kept", reopen_blocked: "reopen blocked",
 };
 const STATUS_VAR = {
   todo: "todo", in_progress: "prog", done: "done", blocked: "block", cancelled: "cancel",
 };
+
+// Status nomlari o'z-o'zidan tushunarli emas: "blocked" nima — men to'xtatdimmi
+// yoki boshqa ish kutyaptimi? "cancelled" bilan "done" farqi nima? Har bir
+// statusning bitta jumlalik ta'rifi hover'da chiqadi — o'rganish uchun hujjat
+// o'qish shart bo'lmasin.
+const STATUS_DEF = {
+  todo:        "Not started yet.",
+  in_progress: "Being worked on right now.",
+  done:        "Finished. Sync will not reopen it.",
+  blocked:     "Cannot move — waiting on something else.",
+  cancelled:   "Dropped on purpose. Will not be done.",
+};
+const GHOST_DEF = "Loosend was not sure this is real work. Keep it or delete it.";
 
 function timeAgo(iso) {
   const t = new Date(iso).getTime();
@@ -389,7 +403,7 @@ function timeAgo(iso) {
   return Math.round(s / 86400) + "d ago";
 }
 
-function Node({ n, x, y, selected, fresh, onClick, onStatus }) {
+function Node({ n, x, y, selected, fresh, onClick, onStatus, onAccept }) {
   // Loyiha tuguni: bosilmaydi, statusi yo'q — u ish emas, sarlavha.
   if (n.synthetic) {
     return html`
@@ -415,20 +429,26 @@ function Node({ n, x, y, selected, fresh, onClick, onStatus }) {
            : undefined}>
       <div class="n-title" title=${n.title ?? ""}>${n.title}</div>
       <div class="n-meta">
-        <span class=${"chip s-" + n.status}
+        <span class=${"chip s-" + n.status + (onStatus ? " tip" : "")}
               data-status=${onStatus ? n.status : undefined}
-              title=${onStatus ? "Change status" : undefined}
+              data-tip=${(STATUS_DEF[n.status] ?? "") + (onStatus ? " Click to change." : "")}
               onClick=${onStatus
                 ? (e) => { e.stopPropagation(); onStatus(n, e.currentTarget.getBoundingClientRect()); }
                 : undefined}>${STATUS_EN[n.status] ?? n.status}</span>
         ${n.type === "milestone" ? html`<span class="chip">Milestone</span>` : null}
-        ${n.is_ghost ? html`<span class="chip">Guess</span>` : null}
+        ${n.is_ghost
+          ? html`<span class=${"chip guess" + (onAccept ? " tip act" : "")}
+                       data-tip=${GHOST_DEF + (onAccept ? " Click to keep." : "")}
+                       onClick=${onAccept
+                         ? (e) => { e.stopPropagation(); onAccept(n); }
+                         : undefined}>Guess</span>`
+          : null}
         ${n.ctx ? html`<span class="chip">Has open work</span>` : null}
       </div>
     </div>`;
 }
 
-function Canvas({ nodes, selected, onSelect, freshIds, hiddenCount = 0, onStatus }) {
+function Canvas({ nodes, selected, onSelect, freshIds, hiddenCount = 0, onStatus, onAccept }) {
   const stage = useRef(null);
   const [view, setView] = useState({ x: 60, y: 40, k: 1 });
   // Gesture eslatmasi faqat birinchi tashrifda. Har safar chiqsa u yuqoridagi
@@ -551,7 +571,7 @@ function Canvas({ nodes, selected, onSelect, freshIds, hiddenCount = 0, onStatus
           if (!p) return null;
           return html`<${Node} key=${n.id} n=${n} x=${p.x} y=${p.y}
                         selected=${selected?.id === n.id} fresh=${freshIds.has(n.id)}
-                        onClick=${onSelect} onStatus=${onStatus} />`;
+                        onClick=${onSelect} onStatus=${onStatus} onAccept=${onAccept} />`;
         })}
       </div>
 
@@ -655,6 +675,9 @@ function Menu({ title, items, pos, onClose }) {
             <span class="lbl">${it.label}</span>
             <span class="k">${it.soon ? "Soon" : it.k}</span>
           </button>`)}
+      ${items[cur]?.hint
+        ? html`<div class="mhint">${items[cur].hint}</div>`
+        : null}
     </div>`;
 }
 
@@ -1016,9 +1039,9 @@ function Side({ selected, events, chats, open, onToggle, loading,
               <div class="ev">
                 <div class="ti">${selected.title}</div>
                 <div class="n-meta" style=${{ marginTop: "9px" }}>
-                  <span class=${"chip s-" + selected.status}>${STATUS_EN[selected.status] ?? selected.status}</span>
+                  <span class=${"chip tip s-" + selected.status} data-tip=${STATUS_DEF[selected.status] ?? ""}>${STATUS_EN[selected.status] ?? selected.status}</span>
                   ${selected.type === "milestone" ? html`<span class="chip">Milestone</span>` : null}
-                  ${selected.is_ghost ? html`<span class="chip">Guess</span>` : null}
+                  ${selected.is_ghost ? html`<span class="chip guess tip" data-tip=${GHOST_DEF}>Guess</span>` : null}
                 </div>
 
                 ${selected.note
@@ -1286,6 +1309,31 @@ function App() {
       ? `"${node.title}" reopened → ${STATUS_EN[status]}`
       : `"${node.title}" → ${STATUS_EN[status]}`);
     loadProject(activeId);      // Activity oqimi yangilansin
+  }, [demo, sb, activeId]);
+
+  // ------------------------------------------------- taxminni qabul qilish --
+  // Ghost (Guess) endi O'ZI O'CHMAYDI (0016). Ilgari 3 ta sync'dan keyin jim
+  // o'chib ketardi — foydalanuvchi nima yo'qolganini bilmasdi. Endi qaror
+  // odamniki: qabul qilasan yoki o'chirasan. Shu tugmacha — "qabul qilaman".
+  const acceptNode = useCallback(async (node) => {
+    if (!node?.is_ghost) return;
+    if (demo) {
+      setNodes((cur) => cur.map((x) => (x.id === node.id ? { ...x, is_ghost: false } : x)));
+      markFresh([node.id]);
+      say(`"${node.title}" kept`);
+      return;
+    }
+    setNodes((cur) => cur.map((x) => (x.id === node.id ? { ...x, is_ghost: false } : x)));
+    markFresh([node.id]);
+
+    const { error } = await sb.rpc("node_accept", { p_node: node.id });
+    if (error) {
+      setNodes((cur) => cur.map((x) => (x.id === node.id ? { ...x, is_ghost: true } : x)));
+      say("Could not keep it: " + error.message);
+      return;
+    }
+    say(`"${node.title}" kept — no longer a guess`);
+    loadProject(activeId);
   }, [demo, sb, activeId]);
 
   // ------------------------------------------------------------ o'chirish --
@@ -1692,7 +1740,7 @@ function App() {
         <${Canvas} key=${activeId + ":" + (hideDone ? "1" : "0") + ":" + activeName}
                    nodes=${shown} selected=${selected} onSelect=${setSelected}
                    freshIds=${freshIds.current} hiddenCount=${hidden}
-                   onStatus=${openStatusMenu} />
+                   onStatus=${openStatusMenu} onAccept=${acceptNode} />
         <${Side} selected=${selected} events=${events} chats=${chats}
                  loading=${loading || treeLoading}
                  open=${rightOpen} onToggle=${setRightOpen}
@@ -1714,14 +1762,21 @@ function App() {
                      k: String(i + 1),
                      sw: st,
                      label: STATUS_EN[st],
+                     hint: STATUS_DEF[st],
                      picked: statusMenu.node.status === st,
                      run: () => setNodeStatus(statusMenu.node, st),
                    })),
+                   ...(statusMenu.node.is_ghost ? [{ div: true }, {
+                     k: "K", icon: "check", label: "Keep — this is real work",
+                     hint: GHOST_DEF,
+                     run: () => acceptNode(statusMenu.node),
+                   }] : []),
                    ...(statusMenu.full ? (() => {
                      const node = statusMenu.node;
                      const kids = nodes.filter((x) => x.parent_id === node.id).length;
                      const out = [{ div: true }, {
                        k: "D", icon: "trash", label: "Delete", danger: true,
+                       hint: "Removed for good. Sync will not bring it back.",
                        run: () => deleteNode(node, false),
                      }];
                      if (kids) out.push({

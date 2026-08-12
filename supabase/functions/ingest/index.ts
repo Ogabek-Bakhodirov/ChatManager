@@ -815,12 +815,24 @@ async function runPipeline(
 
   // Qo'riqchi nimani BLOKLAGANini o'qiymiz. Bu jim bo'lishi mumkin emas:
   // "nothing left behind" degan kvitansiya bloklangan urinishni ham aytsin.
-  const blockedEv = await db.select<{ payload: { seq?: number; title?: string } }>(
-    `node_events?select=payload&project_id=eq.${s.out_project_id}` +
-    `&op=eq.reopen_blocked&created_at=gte.${new Date(started).toISOString()}`,
+  // 0017 dan beri ikkita qo'riqchi bor va ikkalasi ham shu kanaldan gapiradi:
+  //   reopen_blocked   — tugatilgan ish qayta ochilmoqchi bo'ldi (0013)
+  //   override_blocked — odam qo'lda qo'ygan statusni AI orqaga surmoqchi (0017)
+  // Ikkalasi ham foydalanuvchining ishini himoya qilgan; ikkalasi ham
+  // KO'RINISHI shart.
+  const blockedEv = await db.select<
+    { op: string; payload: { seq?: number; title?: string; kept_status?: string } }
+  >(
+    `node_events?select=op,payload&project_id=eq.${s.out_project_id}` +
+    `&op=in.(reopen_blocked,override_blocked)` +
+    `&created_at=gte.${new Date(started).toISOString()}`,
   );
   const reopensBlocked = blockedEv
-    .map((e) => ({ seq: e.payload?.seq ?? null, title: e.payload?.title ?? "" }))
+    .map((e) => ({
+      seq: e.payload?.seq ?? null,
+      title: e.payload?.title ?? "",
+      kept: e.payload?.kept_status ?? (e.op === "reopen_blocked" ? "done" : null),
+    }))
     .filter((x) => x.title);
 
   await logRun(db, s, {

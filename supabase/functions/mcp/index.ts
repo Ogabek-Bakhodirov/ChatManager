@@ -599,12 +599,13 @@ Deno.serve(async (req: Request) => {
       // foydalanuvchi chindan qayta ochgan bo'lsa, model buni oshkora aytishi
       // kerak — aks holda esa bu noto'g'ri extraction'ning ushlangan holati.
       const rb = Array.isArray(r.body.reopens_blocked)
-        ? (r.body.reopens_blocked as { seq?: number; title?: string }[])
+        ? (r.body.reopens_blocked as { seq?: number; title?: string; kept?: string }[])
         : [];
       const rbBlock = rb.length
-        ? `\n\n⚠️ BLOCKED: an attempt to reopen finished work was rejected — ` +
-          rb.map((x) => `#${x.seq} ${x.title}`).join(", ") +
-          `.\nIf the user really reopened it, resend with explicit wording ` +
+        ? `\n\n⚠️ BLOCKED: the tree refused to move work backwards — ` +
+          rb.map((x) => `#${x.seq} ${x.title}` + (x.kept ? ` (kept: ${x.kept})` : "")).join(", ") +
+          `.\nThe user set those states by hand, or they were already finished. ` +
+          `If the user really did reopen one, say so explicitly ` +
           `("reopening #N because ..."). Otherwise this was a bad extraction ` +
           `and the guard just saved the tree — no action needed.`
         : "";
