@@ -44,10 +44,18 @@ const LINE_H = 19, CHROME = 48;
 /* Chip kengliklari brauzerda O'LCHANGAN (250px tugun, 10px uppercase, .05em).
    Belgi soniga ko'paytirish ishonchsiz: "In progress" da ikkita bo'sh joy bor
    va u "Has open work" dan qisqa, garchi harflari ko'p bo'lsa ham. */
+// Status chipi bosiladigan bo'lgach unga karet (::after) va 1px ramka
+// qo'shildi — eski qiymatlar ~12px kam edi va tugun balandligi kam
+// baholanardi. Bu ro'yxat 2026-08 da brauzerda qayta o'lchandi (transform
+// scale hisobga olinib): .n-meta > * ning haqiqiy getBoundingClientRect'i.
 const CHIP_W = {
-  "To do": 52, "In progress": 96, "Done": 49, "Blocked": 70, "Cancelled": 84,
-  "Milestone": 84, "Guess": 54, "Has open work": 117,
+  "To do": 66, "In progress": 109, "Done": 61, "Blocked": 83, "Cancelled": 97,
+  "Milestone": 84, "Guess": 56, "Has open work": 117,
 };
+// Prioritet belgisi: bo'sh holatda ham joy egallaydi (hover'da paydo
+// bo'lishi kerak, lekin paydo bo'lganda tugun sakramasin).
+const PRI_W = { high: 57, med: 76, low: 53 };
+const PRI_W_NONE = 21;
 const META_INNER = 250 - 14 - 13;   // tugun kengligi minus padding
 const META_GAP = 7, META_ROW = 23;  // chip balandligi 17 + row-gap 6
 
@@ -55,14 +63,20 @@ const META_GAP = 7, META_ROW = 23;  // chip balandligi 17 + row-gap 6
    bilishimiz shart: layout render'dan oldin hisoblanadi va kam baholansa
    tugun pastdagisining ustiga chiqadi. */
 function metaRows(n) {
-  const labels = [STATUS_EN[n.status] ?? n.status];
-  if (n.type === "milestone") labels.push("Milestone");
-  if (n.is_ghost) labels.push("Guess");
-  if (n.ctx) labels.push("Has open work");
+  // Kengliklar brauzerda o'lchangan (0018), taxmin qilinmagan.
+  const widths = [CHIP_W[STATUS_EN[n.status] ?? n.status] ?? 60];
+  // Prioritet belgisi milestone'da ko'rsatilmaydi (u ish emas, sarlavha).
+  if (n.type !== "milestone") {
+    widths.push(PRI_W[n.priority] ?? PRI_W_NONE);
+  }
+  if (n.type === "milestone") widths.push(CHIP_W["Milestone"]);
+  if (n.is_ghost) widths.push(CHIP_W["Guess"]);
+  if (n.ctx) widths.push(CHIP_W["Has open work"]);
+  // #42 — raqam uzunligiga qarab o'sadi.
+  if (n.seq != null) widths.push(19 + 7.6 * String(n.seq).length);
 
   let rows = 1, w = 0;
-  for (const l of labels) {
-    const cw = CHIP_W[l] ?? (20 + 7 * l.length);
+  for (const cw of widths) {
     if (w === 0) { w = cw; continue; }
     if (w + META_GAP + cw > META_INNER) { rows++; w = cw; }
     else w += META_GAP + cw;
@@ -318,26 +332,26 @@ function writeTheme(t) {
 /*  Demo ma'lumot — sozlamasiz ochilganda nima ko'rinishini ko'rsatadi     */
 /* ====================================================================== */
 const DEMO = [
-  { id: "1", parent_id: null, title: "F0 Foundation", status: "done", position: 0, type: "milestone" },
-  { id: "2", parent_id: "1", title: "Create the 9 core tables", status: "done", position: 0 },
-  { id: "3", parent_id: "1", title: "Write the RLS policies", status: "done", position: 1 },
-  { id: "4", parent_id: "1", title: "Ship the apply_ops function", status: "done", position: 2,
+  { id: "1", seq: 1, parent_id: null, title: "F0 Foundation", status: "done", position: 0, type: "milestone" },
+  { id: "2", seq: 2, parent_id: "1", title: "Create the 9 core tables", status: "done", position: 0 },
+  { id: "3", seq: 3, parent_id: "1", title: "Write the RLS policies", status: "done", position: 1 },
+  { id: "4", seq: 4, parent_id: "1", title: "Ship the apply_ops function", status: "done", position: 2,
     note: "Two chats syncing at the same time were interleaving their writes and producing duplicate nodes. apply_ops now applies a whole batch inside one transaction behind an advisory lock on the project. Ordering matters: parents are written before children, otherwise temp ids resolve to nothing.",
     evidence_quote: "apply_ops applies operations atomically, behind an advisory lock, so two chats can never interleave." },
-  { id: "5", parent_id: "1", title: "Test the migration on Postgres", status: "done", position: 3 },
-  { id: "6", parent_id: null, title: "F1 Hook adapter", status: "in_progress", position: 1, type: "milestone" },
-  { id: "7", parent_id: "6", title: "Publish the npm package", status: "done", position: 0 },
-  { id: "8", parent_id: "6", title: "Transcript parser", status: "done", position: 1 },
-  { id: "9", parent_id: "6", title: "Background sync worker", status: "in_progress", position: 2,
+  { id: "5", seq: 5, parent_id: "1", title: "Test the migration on Postgres", status: "done", position: 3 },
+  { id: "6", seq: 6, parent_id: null, title: "F1 Hook adapter", status: "in_progress", position: 1, type: "milestone" },
+  { id: "7", seq: 7, parent_id: "6", title: "Publish the npm package", status: "done", position: 0 },
+  { id: "8", seq: 8, parent_id: "6", title: "Transcript parser", status: "done", position: 1 },
+  { id: "9", seq: 9, parent_id: "6", title: "Background sync worker", status: "in_progress", position: 2, priority: "med",
     note: "Syncing on every message was too expensive, so the worker batches changes and flushes every 30 seconds into a single apply_ops call. Left in progress because the flush still fires while a message is mid-stream.",
     evidence_quote: "Worker runs every 30s and batches into one apply_ops call." },
-  { id: "10", parent_id: "6", title: "Fix the cursor crash on resume", status: "blocked", position: 3,
+  { id: "10", seq: 10, parent_id: "6", title: "Fix the cursor crash on resume", status: "blocked", position: 3, priority: "high",
     note: "The parser throws when a session resumes mid-stream, because the SDK emits no resume event to re-anchor the cursor. Decided to wait for the SDK release rather than patch around it — the workaround would have to be torn out again.",
     evidence_quote: "It throws when the session resumes mid-stream — blocked until the SDK ships the resume event." },
-  { id: "11", parent_id: null, title: "F2 Canvas", status: "todo", position: 2, type: "milestone" },
-  { id: "12", parent_id: "11", title: "Draw the task tree", status: "in_progress", position: 0 },
-  { id: "13", parent_id: "11", title: "Realtime subscription", status: "todo", position: 1 },
-  { id: "14", parent_id: "11", title: "Inline node editing", status: "todo", position: 2, is_ghost: true },
+  { id: "11", seq: 11, parent_id: null, title: "F2 Canvas", status: "todo", position: 2, type: "milestone" },
+  { id: "12", seq: 12, parent_id: "11", title: "Draw the task tree", status: "in_progress", position: 0 },
+  { id: "13", seq: 13, parent_id: "11", title: "Realtime subscription", status: "todo", position: 1, priority: "low" },
+  { id: "14", seq: 14, parent_id: "11", title: "Inline node editing", status: "todo", position: 2, is_ghost: true },
 ];
 
 const DEMO_CONTEXT = {
@@ -393,6 +407,21 @@ const STATUS_DEF = {
 };
 const GHOST_DEF = "Loosend was not sure this is real work. Keep it or delete it.";
 
+// Prioritet — FAQAT odam qo'yadi (0018). Extraction unga tegmaydi: chatda
+// "buni tez qilish kerak" degan gap deyarli har taskda bor, model o'qisa
+// hammasi 'high' bo'lib belgi ma'nosini yo'qotadi. Muhimlik — matndan
+// ajratiladigan fakt emas, odamning qarori.
+const PRI_ORDER = ["high", "med", "low", "none"];
+const PRI_EN = { high: "High", med: "Medium", low: "Low", none: "No priority" };
+const PRI_VAR = { high: "pri-high", med: "pri-med", low: "pri-low", none: "faint" };
+const PRI_DEF = {
+  high: "Do this before the rest.",
+  med: "Matters, but not first.",
+  low: "Nice to have.",
+  none: "No priority set. Most nodes stay here.",
+};
+const PRI_KEY = { high: "\u21e71", med: "\u21e72", low: "\u21e73", none: "\u21e70" };
+
 function timeAgo(iso) {
   const t = new Date(iso).getTime();
   if (!Number.isFinite(t)) return "";
@@ -403,7 +432,8 @@ function timeAgo(iso) {
   return Math.round(s / 86400) + "d ago";
 }
 
-function Node({ n, x, y, selected, fresh, onClick, onStatus, onAccept }) {
+function Node({ n, x, y, selected, fresh, onClick, onStatus, onAccept, onPri, onRef, copiedRef }) {
+  const copied = copiedRef === n.id;
   // Loyiha tuguni: bosilmaydi, statusi yo'q — u ish emas, sarlavha.
   if (n.synthetic) {
     return html`
@@ -435,6 +465,17 @@ function Node({ n, x, y, selected, fresh, onClick, onStatus, onAccept }) {
               onClick=${onStatus
                 ? (e) => { e.stopPropagation(); onStatus(n, e.currentTarget.getBoundingClientRect()); }
                 : undefined}>${STATUS_EN[n.status] ?? n.status}</span>
+        ${onPri && n.type !== "milestone"
+          ? html`<span class=${"pri tip p-" + (n.priority ?? "none")}
+                       data-tip=${PRI_DEF[n.priority ?? "none"] + " Click to change."}
+                       onClick=${(e) => {
+                         e.stopPropagation();
+                         onPri(n, e.currentTarget.getBoundingClientRect());
+                       }}>
+                   <span class="bars"><i></i><i></i><i></i></span>
+                   ${n.priority ? PRI_EN[n.priority] : ""}
+                 </span>`
+          : null}
         ${n.type === "milestone" ? html`<span class="chip">Milestone</span>` : null}
         ${n.is_ghost
           ? html`<span class=${"chip guess" + (onAccept ? " tip act" : "")}
@@ -444,11 +485,17 @@ function Node({ n, x, y, selected, fresh, onClick, onStatus, onAccept }) {
                          : undefined}>Guess</span>`
           : null}
         ${n.ctx ? html`<span class="chip">Has open work</span>` : null}
+        ${n.seq != null
+          ? html`<span class=${"nid" + (copied ? " copied" : "")}
+                       title="Copy this ref — paste it in chat"
+                       onClick=${(e) => { e.stopPropagation(); onRef?.(n); }}>#${n.seq}</span>`
+          : null}
       </div>
     </div>`;
 }
 
-function Canvas({ nodes, selected, onSelect, freshIds, hiddenCount = 0, onStatus, onAccept }) {
+function Canvas({ nodes, selected, onSelect, freshIds, hiddenCount = 0, onStatus, onAccept,
+                 onPri, onRef, copiedRef }) {
   const stage = useRef(null);
   const [view, setView] = useState({ x: 60, y: 40, k: 1 });
   // Gesture eslatmasi faqat birinchi tashrifda. Har safar chiqsa u yuqoridagi
@@ -571,7 +618,8 @@ function Canvas({ nodes, selected, onSelect, freshIds, hiddenCount = 0, onStatus
           if (!p) return null;
           return html`<${Node} key=${n.id} n=${n} x=${p.x} y=${p.y}
                         selected=${selected?.id === n.id} fresh=${freshIds.has(n.id)}
-                        onClick=${onSelect} onStatus=${onStatus} onAccept=${onAccept} />`;
+                        onClick=${onSelect} onStatus=${onStatus} onAccept=${onAccept}
+                        onPri=${onPri} onRef=${onRef} copiedRef=${copiedRef} />`;
         })}
       </div>
 
@@ -1040,6 +1088,13 @@ function Side({ selected, events, chats, open, onToggle, loading,
                 <div class="ti">${selected.title}</div>
                 <div class="n-meta" style=${{ marginTop: "9px" }}>
                   <span class=${"chip tip s-" + selected.status} data-tip=${STATUS_DEF[selected.status] ?? ""}>${STATUS_EN[selected.status] ?? selected.status}</span>
+                  ${selected.priority
+                    ? html`<span class=${"pri tip p-" + selected.priority}
+                                 data-tip=${PRI_DEF[selected.priority]}>
+                             <span class="bars"><i></i><i></i><i></i></span>
+                             ${PRI_EN[selected.priority]}
+                           </span>`
+                    : null}
                   ${selected.type === "milestone" ? html`<span class="chip">Milestone</span>` : null}
                   ${selected.is_ghost ? html`<span class="chip guess tip" data-tip=${GHOST_DEF}>Guess</span>` : null}
                 </div>
@@ -1311,6 +1366,68 @@ function App() {
     loadProject(activeId);      // Activity oqimi yangilansin
   }, [demo, sb, activeId]);
 
+  // --------------------------------------------------------- prioritet -----
+  // Statusdan MUTLAQO boshqa o'lchov: status "qayerda turibdi", prioritet
+  // "qanchalik muhim". Ikkalasini bir belgiga siqish — eng keng tarqalgan
+  // xato; biz alohida qoldiramiz.
+  const [priMenu, setPriMenu] = useState(null);
+
+  const openPriMenu = useCallback((n, rect) => {
+    if (n.synthetic) return;
+    setPriMenu({
+      node: n,
+      pos: {
+        left: Math.max(10, Math.min(rect.left, window.innerWidth - 220)),
+        top: rect.bottom + 6 + 230 > window.innerHeight ? undefined : rect.bottom + 6,
+        bottom: rect.bottom + 6 + 230 > window.innerHeight
+          ? window.innerHeight - rect.top + 6 : undefined,
+      },
+    });
+  }, []);
+
+  const setNodePriority = useCallback(async (node, pri) => {
+    if (!node) return;
+    const next = pri === "none" ? null : pri;
+    if ((node.priority ?? null) === next) return;
+
+    if (demo) {
+      setNodes((cur) => cur.map((x) => (x.id === node.id ? { ...x, priority: next } : x)));
+      markFresh([node.id]);
+      say(`"${node.title}" → ${PRI_EN[pri]}`);
+      return;
+    }
+
+    const before = node.priority ?? null;
+    setNodes((cur) => cur.map((x) =>
+      (x.id === node.id ? { ...x, priority: next, is_ghost: false } : x)));
+    markFresh([node.id]);
+
+    const { error } = await sb.rpc("node_set_priority", {
+      p_node: node.id, p_priority: next,
+    });
+    if (error) {
+      setNodes((cur) => cur.map((x) => (x.id === node.id ? { ...x, priority: before } : x)));
+      say("Could not set priority: " + error.message);
+      return;
+    }
+    say(next ? `"${node.title}" → ${PRI_EN[pri]}` : `"${node.title}" — priority cleared`);
+    loadProject(activeId);
+  }, [demo, sb, activeId]);
+
+  // ------------------------------------------------------ tugun raqami -----
+  // #42 ni bosish uni nusxalaydi. Sabab: chatda "#42 done" deb yozish —
+  // daraxt bilan suhbat orasidagi eng qisqa ko'prik. Raqamni qo'lda terish
+  // xato beradi, nusxalash bermaydi.
+  const [copiedRef, setCopiedRef] = useState(null);
+  const copyRef = useCallback((n) => {
+    if (n.seq == null) return;
+    const t = `#${n.seq}`;
+    try { navigator.clipboard?.writeText(t); } catch { /* ruxsat yo'q — jim */ }
+    setCopiedRef(n.id);
+    say(`${t} copied — paste it in chat`);
+    setTimeout(() => setCopiedRef((c) => (c === n.id ? null : c)), 1400);
+  }, []);
+
   // ------------------------------------------------- taxminni qabul qilish --
   // Ghost (Guess) endi O'ZI O'CHMAYDI (0016). Ilgari 3 ta sync'dan keyin jim
   // o'chib ketardi — foydalanuvchi nima yo'qolganini bilmasdi. Endi qaror
@@ -1380,19 +1497,34 @@ function App() {
     loadProject(activeId);
   }, [demo, sb, activeId]);
 
-  // 1-5 klavishlari: tanlangan tugun statusini tez o'zgartirish
+  // Klavishlar: 1-5 status, Shift+1/2/3 prioritet, Shift+0 tozalash.
+  //
+  // Shift bilan bosilgan raqam KLAVIATURAGA QARAB boshqa belgi beradi
+  // (US'da "!", boshqa maketlarda boshqacha). Shuning uchun e.key emas,
+  // e.code ("Digit1") ni o'qiymiz — u fizik tugmani bildiradi va har
+  // qanday til maketida bir xil ishlaydi.
   useEffect(() => {
     const onKey = (e) => {
-      if (!selected || statusMenu) return;
+      if (!selected || statusMenu || priMenu) return;
       if (e.metaKey || e.ctrlKey || e.altKey) return;
       if (/^(INPUT|TEXTAREA)$/.test(document.activeElement?.tagName ?? "")) return;
+
+      const m = /^Digit([0-9])$/.exec(e.code ?? "");
+      if (e.shiftKey) {
+        if (!m) return;
+        const pv = { 1: "high", 2: "med", 3: "low", 0: "none" }[m[1]];
+        if (!pv) return;
+        e.preventDefault();
+        setNodePriority(selected, pv);
+        return;
+      }
       if (!/^[1-5]$/.test(e.key)) return;
       e.preventDefault();
       setNodeStatus(selected, STATUS_ORDER[+e.key - 1]);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [selected, statusMenu, setNodeStatus]);
+  }, [selected, statusMenu, priMenu, setNodeStatus, setNodePriority]);
 
   const markFresh = (ids) => {
     ids.forEach((id) => freshIds.current.add(id));
@@ -1450,7 +1582,7 @@ function App() {
     setTreeLoading(true);
     try {
     const { data: ns } = await client.from("nodes")
-      .select("id,parent_id,title,status,type,position,is_ghost,note,evidence_quote,origin_session_id")
+      .select("id,seq,parent_id,title,status,type,position,is_ghost,priority,note,evidence_quote,origin_session_id")
       .eq("project_id", pid);
     setNodes(ns ?? []);
     const { data: ev } = await client.from("node_events")
@@ -1740,7 +1872,8 @@ function App() {
         <${Canvas} key=${activeId + ":" + (hideDone ? "1" : "0") + ":" + activeName}
                    nodes=${shown} selected=${selected} onSelect=${setSelected}
                    freshIds=${freshIds.current} hiddenCount=${hidden}
-                   onStatus=${openStatusMenu} onAccept=${acceptNode} />
+                   onStatus=${openStatusMenu} onAccept=${acceptNode}
+                   onPri=${openPriMenu} onRef=${copyRef} copiedRef=${copiedRef} />
         <${Side} selected=${selected} events=${events} chats=${chats}
                  loading=${loading || treeLoading}
                  open=${rightOpen} onToggle=${setRightOpen}
@@ -1787,6 +1920,20 @@ function App() {
                      return out;
                    })() : []),
                  ]} />` : null}
+
+      ${priMenu ? html`
+        <${Menu} title="Set priority"
+                 pos=${priMenu.pos}
+                 onClose=${() => setPriMenu(null)}
+                 items=${PRI_ORDER.map((pv) => ({
+                   k: PRI_KEY[pv],
+                   sw: pv === "none" ? null : PRI_VAR[pv],
+                   icon: pv === "none" ? "minus" : undefined,
+                   label: PRI_EN[pv],
+                   hint: PRI_DEF[pv],
+                   picked: (priMenu.node.priority ?? "none") === pv,
+                   run: () => setNodePriority(priMenu.node, pv),
+                 }))} />` : null}
 
       ${confirmDel
         ? html`<${DeleteNodeDialog} node=${confirmDel.node} kids=${confirmDel.kids}

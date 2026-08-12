@@ -52,6 +52,12 @@
   --block-fill:    #3A1D18;   --block-ink:  #F0A093;
   --cancel-fill:   #212726;   --cancel-ink: #8B9491;
   --neutral-fill:  #232A29;   --neutral-ink:#9BA5A1;
+  /* Prioritet (0018). 'high' bloklangan rangning muloyim varianti — ikkalasi
+     ham "diqqat" degani. 'med' iliq oxra, accent bilan raqobatlashmaydi. */
+  --pri-high-fill: #3A1D18;   --pri-high-ink: #F0A093;
+  --pri-med-fill:  #33290F;   --pri-med-ink:  #E2BE78;
+  --pri-low-fill:  #232A29;   --pri-low-ink:  #A2ACA8;
+  --pri-high:      #E0796A;   --pri-med:      #D2A24E;   --pri-low: #7E8A86;
 
   /* canvas */
   --grid-dot:      #232B2A;
@@ -110,6 +116,10 @@
   --block-fill:    #F8E6E1;   --block-ink:  #8E2F1E;
   --cancel-fill:   #ECEBE5;   --cancel-ink: #6E7276;
   --neutral-fill:  #ECEBE5;   --neutral-ink:#5C6165;
+  --pri-high-fill: #F8E6E1;   --pri-high-ink: #8E2F1E;
+  --pri-med-fill:  #F4EBD8;   --pri-med-ink:  #74510C;
+  --pri-low-fill:  #ECEBE5;   --pri-low-ink:  #5C6165;
+  --pri-high:      #A83A26;   --pri-med:      #8A6112;   --pri-low: #7A7F83;
 
   --grid-dot:      #DCDBD3;
   --edge:          #CBCAC2;
@@ -527,6 +537,48 @@ button.danger[disabled] { opacity: .45; filter: none; }
   border-top: 3.5px solid currentColor; opacity: .55;
 }
 
+/* Prioritet belgisi (0018) ---------------------------------------------
+   Uchta ustun: past = 1 ta yonadi, o'rta = 2, yuqori = 3. Rang ikkinchi
+   darajali signal — shakl o'zi ham ma'no beradi (rang ko'rmaydiganlar va
+   qora-oq skrinshot uchun). Prioritetsiz tugun HECH NARSA ko'rsatmaydi:
+   200 ta tugunning 190 tasida belgi bo'lsa, belgi ma'nosini yo'qotadi. */
+.pri {
+  display: inline-flex; align-items: center; gap: 4px; cursor: pointer;
+  padding: 2px 6px 2px 5px; border-radius: 20px; font-size: 10px; font-weight: 600;
+  letter-spacing: .05em; text-transform: uppercase; white-space: nowrap;
+  background: var(--neutral-fill); color: var(--neutral-ink);
+  border: 1px solid transparent; transition: border-color .14s;
+}
+.pri:hover { border-color: currentColor; }
+.pri .bars { display: flex; align-items: flex-end; gap: 1.5px; height: 8px; }
+.pri .bars i { width: 2px; border-radius: 1px; background: currentColor; opacity: .28; }
+.pri .bars i:nth-child(1) { height: 4px; }
+.pri .bars i:nth-child(2) { height: 6px; }
+.pri .bars i:nth-child(3) { height: 8px; }
+.pri.p-low  .bars i:nth-child(-n+1) { opacity: 1; }
+.pri.p-med  .bars i:nth-child(-n+2) { opacity: 1; }
+.pri.p-high .bars i { opacity: 1; }
+.pri.p-high { background: var(--pri-high-fill); color: var(--pri-high-ink); }
+.pri.p-med  { background: var(--pri-med-fill);  color: var(--pri-med-ink); }
+.pri.p-low  { background: var(--pri-low-fill);  color: var(--pri-low-ink); }
+.pri.p-none { background: transparent; color: var(--faint); padding-left: 4px; }
+.pri.p-none:hover { background: var(--neutral-fill); }
+/* Bo'sh belgi faqat hover/tanlanganda ko'rinadi — aks holda 200 ta bo'sh
+   ustun daraxtni shovqinga to'ldiradi. */
+.node .pri.p-none { opacity: 0; }
+.node:hover .pri.p-none, .node.sel .pri.p-none { opacity: 1; }
+
+/* Tugun raqami (#42) ---------------------------------------------------
+   Chatda "#42 done" deb yozish uchun raqam KO'RINISHI kerak. Ilgari u
+   faqat daraxt matnida bor edi — kartada yo'q. Bosilganda nusxalanadi. */
+.nid {
+  margin-left: auto; font-size: 10.5px; font-weight: 600; letter-spacing: .02em;
+  color: var(--muted); font-variant-numeric: tabular-nums; cursor: pointer;
+  padding: 1px 4px; border-radius: 5px; border: 1px solid transparent;
+}
+.nid:hover { color: var(--text-dim); background: var(--neutral-fill); border-color: var(--line); }
+.nid.copied { color: var(--accent); border-color: var(--accent); }
+
 /* Ta'rif qalqonchasi (0016) --------------------------------------------
    "blocked" va "cancelled" nomlari o'z-o'zidan tushunarli emas. Native
    `title=` sekin (~1s) va uslubsiz — o'zimiznikini chizamiz. Hover 350ms
@@ -568,8 +620,13 @@ button.danger[disabled] { opacity: .45; filter: none; }
 .sw-done { background: var(--done); }
 .sw-blocked { background: var(--block); }
 .sw-cancelled { background: var(--cancel); }
+.sw-pri-high { background: var(--pri-high); }
+.sw-pri-med  { background: var(--pri-med); }
+.sw-pri-low  { background: var(--pri-low); }
 
-.src { width: 7px; height: 7px; border-radius: 2px; background: var(--edge); margin-left: auto; }
+/* .nid endi `margin-left:auto` ni oladi, shuning uchun .src uni yo'qotadi —
+   aks holda ikkalasi ham o'ngga surilib bir-birini uzoqlashtiradi. */
+.src { width: 7px; height: 7px; border-radius: 2px; background: var(--edge); margin-left: 0; }
 
 .zoom {
   position: absolute; right: 16px; bottom: 16px; display: flex; gap: 5px; padding: 5px;
