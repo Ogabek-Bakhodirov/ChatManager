@@ -173,6 +173,53 @@ const TOOLS = [
       },
     },
   },
+  {
+    name: "chat_manager_pending",
+    description:
+      "Shows the tasks that are WAITING FOR THE USER'S APPROVAL before they enter " +
+      "the tree. Nothing here is in the tree yet.\n\n" +
+      "Call it when the user asks 'what's waiting', 'show pending', or when a " +
+      "pending list was announced and you want to show it. Each item has a number " +
+      "and an id. Show the user the NUMBERED list and ask which to keep. When they " +
+      "answer (e.g. '1 3' or 'all' or nothing), call `chat_manager_confirm` with the " +
+      "ids of the picked items.\n\n" +
+      "SILENCE MEANS NO: if the user ignores the list, write nothing — the items " +
+      "expire on their own. Rejection is free; only approval takes an action.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        chat_ref: { type: "string", description: CHAT_REF_DESC },
+        label: { type: "string", description: "Fallback when chat_ref is unavailable." },
+      },
+    },
+  },
+  {
+    name: "chat_manager_confirm",
+    description:
+      "Writes the pending tasks the user PICKED into the tree, and/or rejects the " +
+      "ones they turned down. Only call it after the user has chosen — never on your " +
+      "own.\n\n" +
+      "Pass the ids (from `chat_manager_pending`) of approved items in `confirm`, and " +
+      "of explicitly rejected items in `reject`. Items the user simply ignored need " +
+      "no id — leave them out and they expire (silence means no).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        chat_ref: { type: "string", description: CHAT_REF_DESC },
+        label: { type: "string", description: "Fallback when chat_ref is unavailable." },
+        confirm: {
+          type: "array",
+          items: { type: "string" },
+          description: "Ids of pending items the user approved. These get written to the tree.",
+        },
+        reject: {
+          type: "array",
+          items: { type: "string" },
+          description: "Ids of pending items the user explicitly rejected.",
+        },
+      },
+    },
+  },
 ];
 
 /* ----------------------------------------------------------- pulse -------
@@ -569,6 +616,32 @@ Deno.serve(async (req: Request) => {
         ));
       }
 
+      // Approval mode: server extraction qildi-yu daraxtga HECH NARSA yozmadi —
+      // bandlar foydalanuvchi tasdig'ini kutmoqda. Raqamli ro'yxatni ko'rsatib,
+      // qaysilarini saqlashini so'raymiz. (Bu chat/MCP yo'li uchun surfacing.)
+      if (typeof r.body.staged === "number") {
+        const pend = (r.body.pending ?? []) as {
+          n: number; id: string; kind: string; title: string; dup_seq: number | null;
+        }[];
+        if (pend.length === 0) {
+          return ok(id, text("No new tasks to approve." + refLine(ref)));
+        }
+        const lines = pend.map((it) =>
+          `${it.n}. [${it.kind === "status" ? "done?" : "new"}] ${it.title}` +
+          (it.dup_seq ? ` (looks like #${it.dup_seq})` : "") +
+          `\n   id: ${it.id}`
+        );
+        return ok(id, text(
+          `${pend.length} task(s) found — WAITING FOR YOUR APPROVAL ` +
+            `(nothing written to the tree yet):\n\n` +
+            lines.join("\n") +
+            `\n\nShow the user this numbered list and ask which to keep. When they ` +
+            `pick (e.g. '1 3' or 'all'), call chat_manager_confirm with those items' ` +
+            `ids. Silence means no — unpicked items expire.` +
+            refLine(ref),
+        ));
+      }
+
       // Daraxt endi sync javobida keladi — alohida so'rov kerak emas.
       const treeText = typeof r.body.tree === "string"
         ? r.body.tree
@@ -650,6 +723,78 @@ Deno.serve(async (req: Request) => {
             ? `\n\n⚠️ Note: the PREVIOUS sync ended with an error (${prevErr}). ` +
               `If that period's work is missing from the tree, send it too.`
             : ""),
+      ));
+    }
+
+    /* --------------------------------------------------------- pending -- */
+    if (name === "chat_manager_pending") {
+      const r = await call({ action: "pending", chat_ref: chatRef, label });
+      if (r.status === 409) {
+        return ok(id, fail(
+          "This conversation is not connected to a project yet. " +
+            "chat_manager_projects → chat_manager_link.",
+        ));
+      }
+      if (r.status >= 400) return ok(id, fail(JSON.stringify(r.body)));
+
+      const items = (r.body.pending ?? []) as {
+        n: number; id: string; kind: string; title: string; dup_seq: number | null;
+      }[];
+      if (items.length === 0) {
+        return ok(id, text("Nothing is waiting for approval." + refLine(r.body.chat_ref)));
+      }
+      const lines = items.map((it) =>
+        `${it.n}. [${it.kind === "status" ? "done?" : "new"}] ${it.title}` +
+        (it.dup_seq ? ` (looks like #${it.dup_seq})` : "") +
+        `\n   id: ${it.id}`
+      );
+      return ok(id, text(
+        "Tasks waiting for the user's approval (NOT in the tree yet):\n\n" +
+          lines.join("\n") +
+          "\n\nShow the user this NUMBERED list and ask which to keep. When they pick " +
+          "(e.g. '1 3' or 'all'), call chat_manager_confirm with those items' ids. " +
+          "Silence means no — anything they ignore expires on its own." +
+          refLine(r.body.chat_ref),
+      ));
+    }
+
+    /* --------------------------------------------------------- confirm -- */
+    if (name === "chat_manager_confirm") {
+      const confirmIds = Array.isArray(args.confirm)
+        ? (args.confirm as unknown[]).filter((x) => typeof x === "string")
+        : [];
+      const rejectIds = Array.isArray(args.reject)
+        ? (args.reject as unknown[]).filter((x) => typeof x === "string")
+        : [];
+      if (confirmIds.length === 0 && rejectIds.length === 0) {
+        return ok(id, fail(
+          "Nothing to confirm or reject — pass the picked items' ids in `confirm` " +
+            "(and any rejected ids in `reject`).",
+        ));
+      }
+
+      const r = await call({
+        action: "confirm",
+        chat_ref: chatRef,
+        label,
+        item_ids: confirmIds,
+        reject_ids: rejectIds,
+      });
+      if (r.status === 409) {
+        return ok(id, fail(
+          "This conversation is not connected to a project yet. " +
+            "chat_manager_projects → chat_manager_link.",
+        ));
+      }
+      if (r.status >= 400) return ok(id, fail(JSON.stringify(r.body)));
+
+      const confTree = String(r.body.tree ?? "").trim();
+      return ok(id, text(
+        `✅ Approved: ${r.body.applied ?? 0} written to the tree` +
+          (Number(r.body.rejected ?? 0) > 0 ? `, ${r.body.rejected} rejected` : "") +
+          `.` +
+          (confTree ? `\n\n${confTree}` : "") +
+          refLine(r.body.chat_ref),
       ));
     }
 

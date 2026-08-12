@@ -89,6 +89,42 @@ if (cmd === "hook" || cmd === "sync") {
 
   if (mode === "session-start") process.exit(0);
 
+  // UserPromptSubmit hook: foydalanuvchi keyingi xabarni yuborganda ishga
+  // tushadi. Kutish ro'yxatini serverdan olib STDOUT ga yozadi — Claude Code
+  // UserPromptSubmit stdout'ini model kontekstiga qo'shadi, ya'ni model ro'yxatni
+  // ko'radi va ko'rsatadi. Stop hook (fonda) staging qiladi; bu hook esa
+  // SURFACING qiladi — modelning "eslashiga" emas, hookka bog'liq. approval_mode
+  // o'chiq bo'lsa pending bo'sh keladi va hech narsa chiqmaydi (jim).
+  if (mode === "prompt") {
+    try {
+      const { status, body } = await send(
+        cfg.url,
+        cfg.token,
+        { action: "pending", source: "claude_code", external_id: cfg.root },
+        { timeoutMs: 5000 }, // prompt bloklanmasin: server sekin bo'lsa jim o'tamiz
+      );
+      const pend = status < 400 && Array.isArray(body.pending) ? body.pending : [];
+      if (pend.length > 0) {
+        const lines = pend.map((it) =>
+          `${it.n}. [${it.kind === "status" ? "done?" : "new"}] ${it.title}` +
+          (it.dup_seq ? ` (looks like #${it.dup_seq})` : "") +
+          `\n   id: ${it.id}`
+        );
+        process.stdout.write(
+          `Loosend — ${pend.length} task(s) are waiting for the user's approval ` +
+          `before they enter the task tree (nothing is in the tree yet):\n\n` +
+          lines.join("\n") +
+          `\n\nShow the user this numbered list and ask which to keep. When they pick ` +
+          `(e.g. "1 3" or "all"), call chat_manager_confirm with those items' ids. ` +
+          `Silence means no — unpicked items expire.\n`,
+        );
+      }
+    } catch {
+      /* jim — prompt hech qachon bloklanmasin */
+    }
+    process.exit(0);
+  }
+
   const transcriptPath = input.transcript_path;
   const cursorFile = cursorPath(cfg.root, input.session_id ?? "default");
   const cursor = readCursor(cursorFile);
@@ -248,7 +284,8 @@ function installHooks(root) {
   }
 
   settings.hooks = settings.hooks ?? {};
-  for (const [event, mode] of [["SessionStart", "session-start"], ["Stop", "sync"], ["SessionEnd", "finalize"]]) {
+  // UserPromptSubmit — approval kutish ro'yxatini chatga chiqarish uchun (D).
+  for (const [event, mode] of [["SessionStart", "session-start"], ["UserPromptSubmit", "prompt"], ["Stop", "sync"], ["SessionEnd", "finalize"]]) {
     const command = `${JSON.stringify(process.execPath)} ${JSON.stringify(SELF)} hook ${mode}`;
     const list = (settings.hooks[event] = settings.hooks[event] ?? []);
     const already = JSON.stringify(list).includes("chatmanager");

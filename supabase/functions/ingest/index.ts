@@ -125,6 +125,9 @@ Deno.serve(async (req: Request) => {
     scope?: string | null;
     moves?: { node?: string; parent?: string | null }[];
     merges?: { keep?: string; absorb?: string }[];
+    item_ids?: string[];        // confirm: tasdiqlangan pending band id'lari
+    reject_ids?: string[];      // confirm: rad etilgan pending band id'lari
+    background?: boolean;       // katta backfillni majburan fonga uzatish
   };
   try {
     body = await req.json();
@@ -325,6 +328,76 @@ Deno.serve(async (req: Request) => {
       ok: true, v: VERSION, chat_ref: s.out_chat_ref,
       moved, merged, rejected, unresolved: bad,
       tree: (t2.data ?? "").trim(),
+    });
+  }
+
+  // ------------------------------------------------------------ pending --
+  // Tasdiq kutayotgan bandlar. Yozmaydi. Har chaqiruvда avval eskirganlarini
+  // tushiramiz (jimlik = yo'q), keyin ochiqlarini raqamlab qaytaramiz.
+  if (action === "pending") {
+    if (!s.out_project_id) {
+      return json({ error: "not_linked", chat_ref: s.out_chat_ref }, 409);
+    }
+    await rpc(db, "expire_pending", { p_project: s.out_project_id });
+    const pr = await rpc<
+      { item_id: string; idx: number; kind: string; title: string; dup_seq: number | null }[]
+    >(db, "list_pending", { p_project: s.out_project_id });
+    const items = pr.data ?? [];
+    return json({
+      ok: true,
+      v: VERSION,
+      chat_ref: s.out_chat_ref,
+      project_name: s.out_project_name,
+      // n — ko'rsatiladigan raqam; id — confirm uchun kerak bo'ladigan uuid
+      pending: items.map((it, i) => ({
+        n: i + 1,
+        id: it.item_id,
+        kind: it.kind,
+        title: it.title,
+        dup_seq: it.dup_seq,
+      })),
+    });
+  }
+
+  // ------------------------------------------------------------ confirm --
+  // Foydalanuvchi tanlagan bandlarni daraxtga o'tkazadi. confirm_pending o'zi
+  // yozmaydi — app.apply_ops'ni chaqiradi, ya'ni barcha eski himoyalar joyida.
+  if (action === "confirm") {
+    if (!s.out_project_id) {
+      return json({ error: "not_linked", chat_ref: s.out_chat_ref }, 409);
+    }
+    const okIds = Array.isArray(body.item_ids)
+      ? body.item_ids.filter((x) => typeof x === "string")
+      : [];
+    const noIds = Array.isArray(body.reject_ids)
+      ? body.reject_ids.filter((x) => typeof x === "string")
+      : [];
+
+    let confirmed = { applied: 0, skipped: 0, ghosts: 0, expired: 0 };
+    if (okIds.length) {
+      const cr = await rpc<
+        { applied: number; skipped: number; ghosts: number; expired: number }[]
+      >(db, "confirm_pending", { p_session: s.out_session_id, p_item_ids: okIds });
+      confirmed = cr.data?.[0] ?? confirmed;
+    }
+
+    let rejected = 0;
+    if (noIds.length) {
+      const rr = await rpc<number>(db, "reject_pending", { p_item_ids: noIds });
+      rejected = Number(rr.data ?? 0);
+    }
+
+    const t = await rpc<string>(db, "tree_compact", {
+      p_project: s.out_project_id, p_scope: "open",
+    });
+    return json({
+      ok: true,
+      v: VERSION,
+      chat_ref: s.out_chat_ref,
+      project_name: s.out_project_name,
+      applied: confirmed.applied,
+      rejected,
+      tree: (t.data ?? "").trim(),
     });
   }
 
@@ -797,6 +870,57 @@ async function runPipeline(
   // Ota-ona farzanddan OLDIN yozilishi shart: apply_ops op'larni tartib bilan
   // qo'llaydi va temp_id xaritasi shu tartibda to'ladi.
   sortParentsFirst(ops);
+
+  // ------------------------------------------------- approval mode ---------
+  // Loyihada settings.approval_mode = true bo'lsa: daraxtga YOZMAYMIZ. Pass A/B
+  // topgan op'lar kutish ro'yxatiga tushadi (0019 stage_batch), foydalanuvchi
+  // tasdiqlagach app.confirm_pending ularni daraxtga o'tkazadi. Default O'CHIQ —
+  // ya'ni approval_mode yozilmagan loyihalar avvalgidek to'g'ridan yozadi.
+  const projRow = await db.select<{ settings: Record<string, unknown> }>(
+    `projects?id=eq.${s.out_project_id}&select=settings`,
+  );
+  const approvalMode = projRow[0]?.settings?.approval_mode === true;
+
+  if (approvalMode) {
+    await rpc<string>(db, "stage_batch", {
+      p_session: s.out_session_id,
+      p_ops: ops,
+      p_cursor: maxSeq,          // xabar "ko'rildi" — keyingi Stop qayta topmaydi
+    });
+    await rpc(db, "expire_pending", { p_project: s.out_project_id });
+    const pend = await rpc<
+      { item_id: string; idx: number; kind: string; title: string; dup_seq: number | null }[]
+    >(db, "list_pending", { p_project: s.out_project_id });
+    const pending = (pend.data ?? []).map((it, i) => ({
+      n: i + 1, id: it.item_id, kind: it.kind, title: it.title, dup_seq: it.dup_seq,
+    }));
+    const treeA = await rpc<string>(db, "tree_compact", { p_project: s.out_project_id });
+
+    await logRun(db, s, {
+      trigger: "stop_hook",
+      messages_in: delta.length,
+      ops_out: ops.length,
+      model: Deno.env.get("EXTRACTOR_MODEL") ?? "claude-haiku-4-5",
+      input_tokens: inTok,
+      output_tokens: outTok,
+      cost_usd: cost,
+      duration_ms: Date.now() - started,
+    });
+
+    // Daraxtga hech narsa yozilmadi — kutish ro'yxati va joriy daraxt qaytadi.
+    return json({
+      ok: true,
+      v: VERSION,
+      chat_ref: s.out_chat_ref,
+      project_name: s.out_project_name,
+      staged: ops.length,
+      pending,
+      cursor: maxSeq,
+      tree: (treeA.data ?? "").trim(),
+      cost_usd: Number(cost.toFixed(6)),
+      duration_ms: Date.now() - started,
+    });
+  }
 
   const applied = await rpc<
     { applied: number; skipped: number; ghosts: number; expired: number }[]
