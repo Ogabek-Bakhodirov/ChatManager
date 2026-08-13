@@ -11,6 +11,48 @@
 
 ---
 
+## STATUS — updated 13 August 2026 (READ THIS FIRST)
+
+**The live roadmap is the Loosend tree, not this document.** Call `chat_manager_tree` and
+trust it. The task lists in sections 2, 9, and 11 below are the ORIGINAL 12 Aug handoff and
+are now partly stale — several "next steps" there are already shipped. When the tree and
+this doc disagree, **the tree wins.**
+
+**Shipped since the original handoff (all on `main`, deployed, live):**
+
+- **Approval queue** — nothing enters the tree without the user confirming it. Migrations
+  `0019_pending_batches` (pending_batches / pending_items tables + stage/list/confirm/reject/
+  expire functions) and `0020_pending_wrappers` (the `public.cm_*` wrappers PostgREST needs).
+  Ingest has an `approval_mode` staging path; MCP gained `chat_manager_confirm` and
+  `chat_manager_pending`. Enabled per project via `projects.settings.approval_mode`. This
+  closes the **Trash** problem (§2).
+- **Duplicate fix** — safe and non-destructive. `dedupeItems` auto-merges ONLY titles that
+  are identical after normalisation; a Sørensen–Dice character-bigram score
+  (`titleSimilarity`) is used ONLY for a "looks like #N" hint (`likely_dup_of`), never to
+  silently merge. This closes the **Duplicates** problem (§2). **Hard-won lesson:** a first
+  fuzzy version silently DROPPED different tasks ("Learn C++" vs "Learn C#", "issue 100" vs
+  "issue 200") — caught and rejected by adversarial debug passes. **Never auto-merge on
+  fuzzy similarity; surface a hint and let the user/approval decide.**
+- **Parent-finding** — Pass B may propose new category parent nodes (`new_parents` +
+  `parent_group`) so a flat batch auto-groups under invented parents (e.g. "Marketing",
+  "Technical"). Server guard: a group needs ≥2 members. Grounded in taxonomy-expansion.
+- **Claude Code hook (step D)** — the npm adapter installs Stop + UserPromptSubmit hooks;
+  the prompt hook surfaces the pending list into the chat automatically, so capture no
+  longer depends on the model remembering to sync. (Package still unpublished — tree #4.)
+
+**Repo moved.** Work only from `~/Loosend`. The old `~/development/chat-manager` duplicate
+was deleted (it caused a wrong-folder deploy). Deploys go to Supabase project
+`jaxrpdxsnxacseckgfzm` (`supabase functions deploy ingest --project-ref jaxrpdxsnxacseckgfzm`).
+
+**Still open (see the tree for the current shape):** owner field + completion question for
+the **Silent completion** problem (tree #2); real-user onboarding + npm publish (#3, #4) —
+the adoption gap and biggest risk; rotate the exposed workspace token (#9); landing / ads /
+user validation; two pipeline reliability gaps (#21, #25); canvas tree editing (#24).
+
+**Working note:** the user prefers replies in Uzbek, simple and short.
+
+---
+
 ## 1. What Loosend is
 
 **The problem.** In a long AI conversation you build a roadmap, then walk it. Task 1
@@ -54,9 +96,11 @@ a fresh Postgres.
   nothing happens. This was measured: 22 minutes of work went uncaptured despite correct
   prompts, a correct skill and a correct MCP server.
 
-**The number that matters most.** 243 nodes in the tree. **Zero users other than the
-author.** No stranger has ever installed Loosend. That is the largest open risk in the
-project and it is not a technical one.
+**The number that matters most.** (The "243 nodes" here is the 12 Aug count — the tree has
+since been wiped and re-seeded into a small, organised roadmap of ~25 nodes; check
+`chat_manager_tree` for the real number.) **Zero users other than the author.** No stranger
+has ever installed Loosend. That is the largest open risk in the project and it is not a
+technical one.
 
 ---
 
