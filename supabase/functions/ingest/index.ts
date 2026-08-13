@@ -29,7 +29,7 @@ import {
 import { callJson } from "./anthropic.ts";
 import { prefilter, stripNoise } from "./prefilter.ts";
 import { extractIds, missingIds, uncoveredLines } from "./identifiers.ts";
-import { type Block, chunkBlocks, mergeItems, dedupeItems, isDuplicateTitle } from "./chunker.ts";
+import { type Block, chunkBlocks, mergeItems, dedupeItems, titleSimilarity } from "./chunker.ts";
 
 interface InMessage {
   id: string;
@@ -683,8 +683,9 @@ async function runPipeline(
 
     for (const it of r.data?.items ?? []) {
       if (!it?.title?.trim()) continue;
-      // Yaqin-dublikat bo'yicha: retry bir ishni boshqacha so'z bilan qaytaradi.
-      const dup = items.some((x) => isDuplicateTitle(x.title, it.title));
+      // FAQAT aniq mos bo'lsa tashlaymiz (xavfsiz). Boshqacha so'z bilan
+      // qaytgan takror keyin kutish ro'yxatida ko'rinadi — jimgina yo'qolmaydi.
+      const dup = items.some((x) => titleSimilarity(x.title, it.title) === 1);
       if (!dup) { items.push(it); recovered++; }
     }
   }
@@ -813,14 +814,14 @@ async function runPipeline(
   }
 
   // --------------------------------------------------- op'larni yig'ish -----
-  // Cross-sync dedup uchun mavjud tugunlar (id + sarlavha). Pass B bir bandni
-  // "new" desa ham, aslida u daraxtdagi tugunning QAYTA YOZILGAN nomi bo'lishi
-  // mumkin. Uni mavjud tugunga bog'laymiz — yangi dublikat yasamaymiz. Bu Pass B
-  // matching ustidagi determenistik xavfsizlik to'ri (handoff 7.6).
+  // Mavjud tugunlar (id + sarlavha) — YANGI band daraxtdagi tugunga o'xshasa,
+  // "looks like #N" ISHORASINI qo'yish uchun. Semantik moslashtirishni Pass B
+  // (LLM) qiladi; bu esa faqat foydalanuvchiga ko'rsatiladigan ishora — hech
+  // narsa jimgina birlashtirilmaydi yoki yo'qotilmaydi.
   const existingNodes = treeEmpty
     ? []
-    : await db.select<{ id: string; title: string; status: string }>(
-      `nodes?project_id=eq.${s.out_project_id}&select=id,title,status`,
+    : await db.select<{ id: string; title: string }>(
+      `nodes?project_id=eq.${s.out_project_id}&select=id,title`,
     );
 
   const byIndex = new Map<number, Placement>();
@@ -832,18 +833,6 @@ async function runPipeline(
   items.forEach((it, i) => {
     const p = byIndex.get(i);
     if (!p) return;
-
-    // Cross-sync: Pass B "new" dedi-yu, daraxtda yaqin-dublikat bor bo'lsa —
-    // uni mavjud tugunga bog'lab qo'yamiz (yangi node o'rniga yangilash). Sof
-    // qayta-yozilgan takror (yangi status/note yo'q) op umuman yaratmaydi ->
-    // jimgina yo'qoladi, dublikat qolmaydi.
-    if (!(p.decision === "match" && p.node_id)) {
-      const dup = existingNodes.find((n) => isDuplicateTitle(n.title, it.title));
-      if (dup) {
-        p.decision = "match";
-        p.node_id = dup.id;
-      }
-    }
 
     const conf = Math.min(
       it.confidence ?? 0.7,
@@ -872,23 +861,24 @@ async function runPipeline(
         evidence: it.evidence?.slice(0, 200),
         evidence_message_id: it.evidence_message_id ?? null,
       };
-      // Sof qayta-yozilgan takror: match qilingan tugun sarlavhasiga YAQIN-
-      // dublikat VA status o'zgarmagan bo'lsa — HECH QANDAY op yaratmaymiz, ya'ni
-      // takror kutish ro'yxatiga umuman tushmaydi. Haqiqiy status o'zgarishi
-      // (masalan "done") yoki boshqacha ish esa avvalgidek surface bo'ladi.
-      const matched = existingNodes.find((n) => n.id === p.node_id);
-      const restatement = !!matched &&
-        isDuplicateTitle(matched.title, it.title) &&
-        (!it.status || it.status === matched.status);
-      if (restatement) {
-        // op yo'q — sof takror
-      } else if (it.status) {
+      if (it.status) {
         ops.push({ op: "set_status", status: it.status, ...base });
       } else if (base.note || base.evidence) {
         ops.push({ op: "annotate", ...base });
       }
     } else {
       const pIdx = normalizeParentIndex(p.parent_index, i, byIndex, items.length);
+      // "looks like #N" ishorasi: eng o'xshash mavjud tugunni topamiz (Dice).
+      // Band BARIBIR yangi bo'lib qoladi — jimgina yo'qolmaydi. Kutish ro'yxati
+      // "(looks like #N)" ko'rsatadi, foydalanuvchi o'zi hal qiladi. Chegara
+      // past: yolg'on ishora zararsiz (odam e'tibormay qo'yadi), jimgina
+      // birlashtirish esa halokatli edi.
+      let likelyDup: string | null = null;
+      let bestSim = 0;
+      for (const n of existingNodes) {
+        const sim = titleSimilarity(n.title, it.title);
+        if (sim > bestSim) { bestSim = sim; likelyDup = n.id; }
+      }
       ops.push({
         op: "add_node",
         temp_id: `t${i}`,
@@ -901,6 +891,7 @@ async function runPipeline(
         note: it.note?.slice(0, 320),
         evidence: it.evidence?.slice(0, 200),
         evidence_message_id: it.evidence_message_id ?? null,
+        likely_dup_of: bestSim >= 0.6 ? likelyDup : null,
       });
     }
   });

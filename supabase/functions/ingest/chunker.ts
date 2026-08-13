@@ -134,77 +134,97 @@ export function chunkBlocks(blocks: Block[], opts: ChunkOpts = {}): string[] {
   });
 }
 
-/** Sarlavhaning ma'noli so'zlari (4+ harf). Qisqa yordamchi so'zlar tashlanadi. */
-function titleWords(s: string): Set<string> {
-  return new Set(
-    (s ?? "").toLowerCase()
-      .replace(/[^\p{L}\p{N}]+/gu, " ")
-      .split(" ")
-      .filter((w) => w.length >= 4),
-  );
+/** Sarlavhani solishtirish uchun normallashtirish: kichik harf, tinish belgilar
+ *  va ortiqcha bo'sh joy bir xilga keltiriladi. Aniq-dublikat kaliti shundan. */
+export function normTitle(s: string): string {
+  return (s ?? "")
+    .toLowerCase()
+    // Apostrof variantlarini (ASCII ', modifier ʻ ʼ, jingalak ' ', `) bittaga
+    // keltiramiz — "oʻzgartirish" va "o'zgartirish" bir xil bo'lsin.
+    .replace(/[ʻʼ‘’`]/g, "'")
+    // MUHIM: belgilarni O'CHIRMAYMIZ, faqat bo'sh joy va katta-kichik harfni
+    // normallashtiramiz. Aks holda "Learn C++" va "Learn C#" (yoki "5%" va "5",
+    // ".NET" va "NET") bir xilga tushib, biri JIMGINA yo'qolardi. Belgi —
+    // task identifikatorining qismi bo'lishi mumkin, shuning uchun saqlanadi.
+    // (Tinish belgisigina farq qiladigan qayta-yozishlar avtomat birlashmay,
+    // "(looks like #N)" ishorasi orqali ko'rinadi — bu xavfsiz.)
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 /**
- * Ikki sarlavha bir XIL ishga ishora qiladimi — "o'xshashlik" bo'yicha, aniq
- * matn bo'yicha emas.
+ * Ikki sarlavhaning o'xshashligi, 0..1 — Sørensen–Dice koeffitsiyenti (belgi-
+ * bigram bo'yicha). Bu `string-similarity` kutubxonasi ishlatgan STANDART,
+ * ko'p yillar sinovdan o'tgan algoritm — o'zimiz o'ylab topmadik.
  *
- * NEGA: model bitta ishni ikki joyda (chunk overlap yoki retry) BOSHQACHA so'z
- * bilan yozadi — "fix duplicate extraction by matching node numbers" va
- * "...matching EXISTING node numbers (#N) instead of title" — bir ish, boshqa
- * jumla. Aniq sarlavha solishtirilsa ular ikki alohida band bo'lib qoladi
- * (jonli kuzatilgan: 13 ta yubordik, 23 chiqdi). Ma'noli so'zlar to'plamining
- * kesishmasi buni ushlaydi.
+ * NEGA belgi-bigram (avvalgi so'z-to'plami usuli emas): so'z-to'plami usuli
+ * qisqa FARQLOVCHI so'zlarni ("issue 100" ~ "issue 200") tashlab, BOSHQA
+ * tasklarni birlashtirib, haqiqiylarini jimgina yo'qotardi (adversarial
+ * testda 17 dan 16 tasi noto'g'ri birlashdi).
  *
- * Qoida: kamida 2 umumiy so'z BO'LSA va (Jaccard >= 0.5 YOKI kichik to'plam
- * deyarli to'liq kattasining ichida — containment >= 0.8 va >= 3 so'z). Chegara
- * lokal test bilan sozlangan: "Build landing" va "Build advertising" ATAYLAB
- * birlashmaydi (ular alohida ish).
+ * MUHIM: bu son FAQAT "o'xshaydi, tekshiring" ishorasi (likely_dup_of) uchun.
+ * HECH QACHON jimgina birlashtirish/o'chirish uchun EMAS — hech qanday lexical
+ * metrika "issue 100" va "issue 200" ni ishonchli ajrata olmaydi. Avtomat
+ * birlashish faqat `normTitle` teng bo'lganda (100% xavfsiz).
  */
-export function isDuplicateTitle(a: string, b: string): boolean {
-  const A = titleWords(a);
-  const B = titleWords(b);
-  // Ma'noli so'z yo'q (juda qisqa sarlavha) — aniq moslikка tushamiz.
-  if (A.size === 0 || B.size === 0) {
-    return (a ?? "").trim().toLowerCase() === (b ?? "").trim().toLowerCase();
-  }
+export function titleSimilarity(a: string, b: string): number {
+  const x = normTitle(a).replace(/ /g, "");
+  const y = normTitle(b).replace(/ /g, "");
+  if (!x.length || !y.length) return 0;
+  if (x === y) return 1;
+  if (x.length < 2 || y.length < 2) return 0;
+
+  const bigrams = (s: string): Map<string, number> => {
+    const m = new Map<string, number>();
+    for (let i = 0; i < s.length - 1; i++) {
+      const bg = s.slice(i, i + 2);
+      m.set(bg, (m.get(bg) ?? 0) + 1);
+    }
+    return m;
+  };
+
+  const A = bigrams(x);
+  const B = bigrams(y);
   let inter = 0;
-  for (const w of A) if (B.has(w)) inter++;
-  if (inter < 2) return false;
-  const union = A.size + B.size - inter;
-  const jaccard = inter / union;
-  const containment = inter / Math.min(A.size, B.size);
-  return jaccard >= 0.5 || (containment >= 0.8 && inter >= 3);
+  for (const [bg, n] of A) {
+    const m = B.get(bg);
+    if (m) inter += Math.min(n, m);
+  }
+  return (2 * inter) / ((x.length - 1) + (y.length - 1));
 }
 
 /**
- * Yaqin-dublikatlarni yig'adi. Birinchi ko'rilgani qoladi; keyingilari unga
- * yig'iladi (uzunroq `note` — kengroq kontekst ko'rgan — saqlanadi).
- * O(n^2), lekin n kichik (bir syncda o'nlab band).
+ * Bandlarni yig'adi — FAQAT aniq (normallashgan sarlavha teng) takrorlarni.
+ * Bu 100% xavfsiz: bir xil matn ikki bo'lakda chiqqanini (chunk overlap)
+ * tozalaydi, lekin o'xshash-lekin-boshqa tasklarni HECH QACHON birlashtirmaydi.
+ * Fuzzy o'xshashlik (titleSimilarity) esa faqat "looks like #N" ishorasi uchun.
+ * Takrorda uzunroq `note` saqlanadi (faqat note — title/status daxlsiz).
  */
 export function dedupeItems<T extends { title: string; note?: string }>(
   items: T[],
 ): { items: T[]; duplicates: number } {
-  const kept: T[] = [];
+  const byKey = new Map<string, T>();
   let duplicates = 0;
   for (const it of items) {
     if (!it?.title?.trim()) continue;
-    const at = kept.findIndex((k) => isDuplicateTitle(k.title, it.title));
-    if (at === -1) {
-      kept.push(it);
+    const key = normTitle(it.title);
+    const prev = byKey.get(key);
+    if (!prev) {
+      byKey.set(key, it);
       continue;
     }
     duplicates++;
-    if ((it.note?.length ?? 0) > (kept[at].note?.length ?? 0)) {
-      kept[at] = { ...kept[at], ...it };
+    if ((it.note?.length ?? 0) > (prev.note?.length ?? 0)) {
+      byKey.set(key, { ...prev, note: it.note });
     }
   }
-  return { items: kept, duplicates };
+  return { items: [...byKey.values()], duplicates };
 }
 
 /**
  * Bo'laklardan kelgan bandlarni birlashtiradi. Overlap sababli bir band bir
- * necha bo'lakda chiqadi — dedupeItems ularni (endi YAQIN-dublikat bo'yicha
- * ham, faqat aniq sarlavha emas) yig'adi.
+ * necha bo'lakda AYNAN bir xil matn bilan chiqadi — dedupeItems (aniq mos)
+ * ularni xavfsiz yig'adi.
  */
 export function mergeItems<T extends { title: string; note?: string }>(
   groups: T[][],
