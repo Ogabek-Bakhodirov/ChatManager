@@ -813,6 +813,16 @@ async function runPipeline(
   }
 
   // --------------------------------------------------- op'larni yig'ish -----
+  // Cross-sync dedup uchun mavjud tugunlar (id + sarlavha). Pass B bir bandni
+  // "new" desa ham, aslida u daraxtdagi tugunning QAYTA YOZILGAN nomi bo'lishi
+  // mumkin. Uni mavjud tugunga bog'laymiz — yangi dublikat yasamaymiz. Bu Pass B
+  // matching ustidagi determenistik xavfsizlik to'ri (handoff 7.6).
+  const existingNodes = treeEmpty
+    ? []
+    : await db.select<{ id: string; title: string; status: string }>(
+      `nodes?project_id=eq.${s.out_project_id}&select=id,title,status`,
+    );
+
   const byIndex = new Map<number, Placement>();
   for (const p of placements) byIndex.set(p.item_index, p);
 
@@ -822,6 +832,18 @@ async function runPipeline(
   items.forEach((it, i) => {
     const p = byIndex.get(i);
     if (!p) return;
+
+    // Cross-sync: Pass B "new" dedi-yu, daraxtda yaqin-dublikat bor bo'lsa —
+    // uni mavjud tugunga bog'lab qo'yamiz (yangi node o'rniga yangilash). Sof
+    // qayta-yozilgan takror (yangi status/note yo'q) op umuman yaratmaydi ->
+    // jimgina yo'qoladi, dublikat qolmaydi.
+    if (!(p.decision === "match" && p.node_id)) {
+      const dup = existingNodes.find((n) => isDuplicateTitle(n.title, it.title));
+      if (dup) {
+        p.decision = "match";
+        p.node_id = dup.id;
+      }
+    }
 
     const conf = Math.min(
       it.confidence ?? 0.7,
@@ -850,7 +872,17 @@ async function runPipeline(
         evidence: it.evidence?.slice(0, 200),
         evidence_message_id: it.evidence_message_id ?? null,
       };
-      if (it.status) {
+      // Sof qayta-yozilgan takror: match qilingan tugun sarlavhasiga YAQIN-
+      // dublikat VA status o'zgarmagan bo'lsa — HECH QANDAY op yaratmaymiz, ya'ni
+      // takror kutish ro'yxatiga umuman tushmaydi. Haqiqiy status o'zgarishi
+      // (masalan "done") yoki boshqacha ish esa avvalgidek surface bo'ladi.
+      const matched = existingNodes.find((n) => n.id === p.node_id);
+      const restatement = !!matched &&
+        isDuplicateTitle(matched.title, it.title) &&
+        (!it.status || it.status === matched.status);
+      if (restatement) {
+        // op yo'q — sof takror
+      } else if (it.status) {
         ops.push({ op: "set_status", status: it.status, ...base });
       } else if (base.note || base.evidence) {
         ops.push({ op: "annotate", ...base });
