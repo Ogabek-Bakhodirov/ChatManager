@@ -200,16 +200,35 @@ Only choose "match" when the item describes the WHOLE of the existing node's wor
 You may also set "parent_index" instead of "parent_id" when the parent is another item in
 this same batch (0-based index). Use it when one item is clearly part of another.
 
+## Proposing a new group (parent-finding)
+
+Prefer an EXISTING parent (parent_id = a #N in the tree). But when several NEW items in this
+batch clearly share a theme and NO existing node fits as their parent, PROPOSE a new parent
+group for them: a short category or area title such as "Marketing", "Bug fixes", "Onboarding".
+List each proposed parent in new_parents with a short key, and point those items' parent_group
+at that key.
+
+Rules for proposed groups:
+- Only group items that genuinely belong to the same area. Never force unrelated items together.
+- A group needs at least TWO members. Do not propose a group for a single item.
+- Prefer an existing parent over inventing one. Invent only when nothing fits.
+- The group title is a category, not a task ("Marketing", not "Do marketing work"). Keep it short.
+
 When genuinely unsure between match and child, choose child. A wrong merge silently loses
 work; an extra level is visible and fixable.
 
 ## Output
 
-{"placements":[{"item_index":0,"decision":"match","node_id":"#42",
+{"new_parents":[{"key":"g1","title":"Marketing"}],
+ "placements":[{"item_index":0,"decision":"match","node_id":"#42",
                 "confidence":0.0-1.0,"reason":"<=100 chars"},
                {"item_index":1,"decision":"new","parent_id":"#7",
+                "confidence":0.0-1.0,"reason":"<=100 chars"},
+               {"item_index":2,"decision":"new","parent_group":"g1",
                 "confidence":0.0-1.0,"reason":"<=100 chars"}]}
 
+new_parents may be empty ([]). A placement uses AT MOST ONE parent: parent_id (existing #N),
+parent_index (another batch item), parent_group (a key from new_parents), or none (root).
 item_index is the 0-based position in the items list. Every item gets exactly one placement.
 
 \`node_id\` and \`parent_id\` are the SHORT IDs shown in the tree — the \`#42\` at the
@@ -224,8 +243,9 @@ Your first character must be { and your last must be }. No fences, no commentary
 export const PASS_B_STRUCTURE_SYSTEM =
   `You organize a flat list of work items into a shallow tree.
 
-You do NOT add, remove, merge, or rewrite items. Every item keeps its index and appears
-exactly once. You only decide who is whose parent.
+You do NOT add, remove, merge, or rewrite the work items themselves. Every item keeps its
+index and appears exactly once. You decide who is whose parent — and you MAY propose new
+parent GROUP nodes (short category titles) to organize related items under.
 
 ## Rules
 
@@ -237,15 +257,22 @@ exactly once. You only decide who is whose parent.
 - An item with no natural parent is a root: parent_index = null.
 - parent_index must be the 0-based index of ANOTHER item in this list, never itself,
   and never form a cycle.
-- If the items genuinely have no structure, return every one as a root. A flat tree is
-  better than an invented one.
+- When several items share a theme but none of them is a natural parent, PROPOSE a new parent
+  GROUP for them — a short category or area title ("Marketing", "Bug fixes", "Backend"). List
+  it in new_parents with a key, and set those items' parent_group to that key. A group needs at
+  least TWO members; never group unrelated items; a group title is a category, not a task.
+- If the items genuinely have no shared structure, return every one as a root. A flat tree is
+  better than an invented one — do not force groups.
 
 ## Output
 
-{"placements":[{"item_index":0,"parent_index":null},
-               {"item_index":1,"parent_index":0}]}
+{"new_parents":[{"key":"g1","title":"Marketing"}],
+ "placements":[{"item_index":0,"parent_index":null},
+               {"item_index":1,"parent_index":0},
+               {"item_index":2,"parent_group":"g1"}]}
 
-Every item gets exactly one entry.
+new_parents may be empty ([]). Each placement uses at most one of parent_index or parent_group
+(or neither = root). Every item gets exactly one entry.
 
 Your first character must be { and your last must be }. No fences, no commentary.`;
 

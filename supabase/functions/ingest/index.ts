@@ -57,8 +57,15 @@ interface Placement {
   node_id?: string | null;
   parent_id?: string | null;
   parent_index?: number | null;
+  parent_group?: string | null;   // Pass B taklif qilgan yangi guruh kaliti
   confidence?: number;
   reason?: string;
+}
+
+/** Pass B taklif qilgan yangi ota-guruh (kategoriya nodei). */
+interface NewParent {
+  key: string;
+  title: string;
 }
 
 interface Session {
@@ -733,11 +740,15 @@ async function runPipeline(
   const treeEmpty = tree === "(bo'sh)" || tree.length === 0;
 
   let placements: Placement[];
+  let newParents: NewParent[] = [];   // Pass B taklif qilgan kategoriya-otalar
 
   if (treeEmpty) {
     // Daraxt bo'sh — moslashtirish kerak emas, LEKIN tuzilma kerak.
     // Bu bosqichsiz birinchi sync doim tekis ro'yxat berardi.
-    const st = await callJson<{ placements: { item_index: number; parent_index: number | null }[] }>(
+    const st = await callJson<{
+      new_parents?: NewParent[];
+      placements: { item_index: number; parent_index?: number | null; parent_group?: string | null }[];
+    }>(
       PASS_B_STRUCTURE_SYSTEM,
       passBStructureUser(items.map((it, i) => ({ i, title: it.title, hint: it.parent_hint }))),
       { apiKey, maxTokens: 2500 },
@@ -747,9 +758,10 @@ async function runPipeline(
     cost += st.costUsd;
     cacheRead += st.cacheRead ?? 0;
 
-    const byIdx = new Map<number, number | null>();
+    newParents = st.data?.new_parents ?? [];
+    const byIdx = new Map<number, { pi: number | null; pg: string | null }>();
     for (const p of st.data?.placements ?? []) {
-      byIdx.set(p.item_index, p.parent_index ?? null);
+      byIdx.set(p.item_index, { pi: p.parent_index ?? null, pg: p.parent_group ?? null });
     }
 
     // Tuzilma bosqichi yiqilsa ham to'xtamaymiz — tekis daraxt yomon, lekin
@@ -757,14 +769,15 @@ async function runPipeline(
     placements = items.map((_, i) => ({
       item_index: i,
       decision: "new" as const,
-      parent_index: byIdx.has(i) ? byIdx.get(i)! : null,
+      parent_index: byIdx.get(i)?.pi ?? null,
+      parent_group: byIdx.get(i)?.pg ?? null,
       confidence: 0.9,
     }));
   } else {
     // Daraxt keshlanadigan prefiksga, bandlar o'zgaruvchi qismga. Ketma-ket
     // synclarda daraxt deyarli bir xil qoladi -> kesh hit -> input narxi 10x
     // arzon. Model ko'radigan matn o'zgarmaydi.
-    const b = await callJson<{ placements: Placement[] }>(
+    const b = await callJson<{ new_parents?: NewParent[]; placements: Placement[] }>(
       PASS_B_SYSTEM,
       passBItemsBlock(items.map((it, i) => ({ i, title: it.title, hint: it.parent_hint }))),
       { apiKey, maxTokens: 4000, cachedPrefix: passBTreeBlock(tree) },
@@ -791,6 +804,7 @@ async function runPipeline(
       return json({ error: "pass_b_failed", detail: b.error }, 502);
     }
     placements = b.data.placements;
+    newParents = b.data.new_parents ?? [];
   }
 
   // ------------------------------------------------ "#42" -> uuid tarjima ---
@@ -830,6 +844,53 @@ async function runPipeline(
   const ops: Record<string, unknown>[] = [];
   const reopens: { node: string; status: string }[] = [];
 
+  // Pass B taklif qilgan yangi kategoriya-otalar. Har biriga temp_id beramiz va
+  // add_node op yaratamiz; bolalar parent_group orqali ulanadi. Faqat KAMIDA 2 ta
+  // bola ishora qilgan guruhni yaratamiz — yolg'iz bandli soxta guruh yasamaymiz
+  // (prompt qoidasini serverda ham himoyalaymiz). Approval bo'lsa, guruhning o'zi
+  // ham kutish ro'yxatida ko'rinadi va foydalanuvchi tasdiqlaydi.
+  const groupTemp = new Map<string, string>();
+  if (newParents.length) {
+    const refCount = new Map<string, number>();
+    for (const p of placements) {
+      if (p.decision !== "match" && p.parent_group) {
+        refCount.set(p.parent_group, (refCount.get(p.parent_group) ?? 0) + 1);
+      }
+    }
+    for (const g of newParents) {
+      // Runtime tekshiruv: LLM ixtiyoriy JSON qaytaradi, `NewParent` faqat
+      // compile-time. Kalit va nom STRING bo'lishini tasdiqlaymiz — aks holda
+      // `.trim()` throw qiladi va butun sync yiqiladi (debugger topdi).
+      if (typeof g?.key !== "string" || !g.key) continue;
+      if (typeof g?.title !== "string" || !g.title.trim()) continue;
+      if (groupTemp.has(g.key)) continue;                 // takror kalit -> o'tkazamiz
+      if ((refCount.get(g.key) ?? 0) < 2) continue;       // yolg'iz bandli guruh yo'q
+
+      // Guruh nomi mavjud tugunga o'xshasa "looks like #N" ishorasini qo'yamiz —
+      // approval'da ko'rinadi (jimgina birlashtirilmaydi, dedup dizayni bilan bir xil).
+      let gLikely: string | null = null;
+      let gSim = 0;
+      for (const n of existingNodes) {
+        const sim = titleSimilarity(n.title, g.title);
+        if (sim > gSim) { gSim = sim; gLikely = n.id; }
+      }
+
+      const tid = `g_${g.key}`;
+      groupTemp.set(g.key, tid);
+      ops.push({
+        op: "add_node",
+        temp_id: tid,
+        parent_temp: null,
+        parent_id: null,
+        title: g.title.trim().slice(0, 120),
+        type: "milestone",
+        status: "todo",
+        confidence: 0.9,
+        likely_dup_of: gSim >= 0.6 ? gLikely : null,
+      });
+    }
+  }
+
   items.forEach((it, i) => {
     const p = byIndex.get(i);
     if (!p) return;
@@ -868,6 +929,9 @@ async function runPipeline(
       }
     } else {
       const pIdx = normalizeParentIndex(p.parent_index, i, byIndex, items.length);
+      // Ota ustuvorligi: yangi guruh (parent_group) > batch item (parent_index) >
+      // mavjud #N (parent_id) > ildiz.
+      const groupParent = p.parent_group ? (groupTemp.get(p.parent_group) ?? null) : null;
       // "looks like #N" ishorasi: eng o'xshash mavjud tugunni topamiz (Dice).
       // Band BARIBIR yangi bo'lib qoladi — jimgina yo'qolmaydi. Kutish ro'yxati
       // "(looks like #N)" ko'rsatadi, foydalanuvchi o'zi hal qiladi. Chegara
@@ -882,8 +946,8 @@ async function runPipeline(
       ops.push({
         op: "add_node",
         temp_id: `t${i}`,
-        parent_temp: pIdx === null ? null : `t${pIdx}`,
-        parent_id: pIdx === null ? (p.parent_id ?? null) : null,
+        parent_temp: groupParent ?? (pIdx === null ? null : `t${pIdx}`),
+        parent_id: groupParent ? null : (pIdx === null ? (p.parent_id ?? null) : null),
         title: it.title,
         type: guessType(it),
         status: it.status ?? "todo",
