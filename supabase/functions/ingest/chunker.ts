@@ -134,37 +134,80 @@ export function chunkBlocks(blocks: Block[], opts: ChunkOpts = {}): string[] {
   });
 }
 
+/** Sarlavhaning ma'noli so'zlari (4+ harf). Qisqa yordamchi so'zlar tashlanadi. */
+function titleWords(s: string): Set<string> {
+  return new Set(
+    (s ?? "").toLowerCase()
+      .replace(/[^\p{L}\p{N}]+/gu, " ")
+      .split(" ")
+      .filter((w) => w.length >= 4),
+  );
+}
+
 /**
- * Bo'laklardan kelgan bandlarni birlashtiradi.
+ * Ikki sarlavha bir XIL ishga ishora qiladimi — "o'xshashlik" bo'yicha, aniq
+ * matn bo'yicha emas.
  *
- * Overlap sababli bir band bir necha bo'lakda chiqadi. Bu KUTILGAN holat —
- * shu yerda birlashtiramiz. Sarlavha bo'yicha solishtiramiz, chunki bir xil
- * ishni ikki bo'lakda model bir xil nomlaydi (matn ham bir xil edi).
+ * NEGA: model bitta ishni ikki joyda (chunk overlap yoki retry) BOSHQACHA so'z
+ * bilan yozadi — "fix duplicate extraction by matching node numbers" va
+ * "...matching EXISTING node numbers (#N) instead of title" — bir ish, boshqa
+ * jumla. Aniq sarlavha solishtirilsa ular ikki alohida band bo'lib qoladi
+ * (jonli kuzatilgan: 13 ta yubordik, 23 chiqdi). Ma'noli so'zlar to'plamining
+ * kesishmasi buni ushlaydi.
  *
- * Takrorlanganda `note` uzunrog'ini olamiz: kengroq kontekst ko'rgan
- * bo'lak yaxshiroq xulosa yozadi.
+ * Qoida: kamida 2 umumiy so'z BO'LSA va (Jaccard >= 0.5 YOKI kichik to'plam
+ * deyarli to'liq kattasining ichida — containment >= 0.8 va >= 3 so'z). Chegara
+ * lokal test bilan sozlangan: "Build landing" va "Build advertising" ATAYLAB
+ * birlashmaydi (ular alohida ish).
+ */
+export function isDuplicateTitle(a: string, b: string): boolean {
+  const A = titleWords(a);
+  const B = titleWords(b);
+  // Ma'noli so'z yo'q (juda qisqa sarlavha) — aniq moslikка tushamiz.
+  if (A.size === 0 || B.size === 0) {
+    return (a ?? "").trim().toLowerCase() === (b ?? "").trim().toLowerCase();
+  }
+  let inter = 0;
+  for (const w of A) if (B.has(w)) inter++;
+  if (inter < 2) return false;
+  const union = A.size + B.size - inter;
+  const jaccard = inter / union;
+  const containment = inter / Math.min(A.size, B.size);
+  return jaccard >= 0.5 || (containment >= 0.8 && inter >= 3);
+}
+
+/**
+ * Yaqin-dublikatlarni yig'adi. Birinchi ko'rilgani qoladi; keyingilari unga
+ * yig'iladi (uzunroq `note` — kengroq kontekst ko'rgan — saqlanadi).
+ * O(n^2), lekin n kichik (bir syncda o'nlab band).
+ */
+export function dedupeItems<T extends { title: string; note?: string }>(
+  items: T[],
+): { items: T[]; duplicates: number } {
+  const kept: T[] = [];
+  let duplicates = 0;
+  for (const it of items) {
+    if (!it?.title?.trim()) continue;
+    const at = kept.findIndex((k) => isDuplicateTitle(k.title, it.title));
+    if (at === -1) {
+      kept.push(it);
+      continue;
+    }
+    duplicates++;
+    if ((it.note?.length ?? 0) > (kept[at].note?.length ?? 0)) {
+      kept[at] = { ...kept[at], ...it };
+    }
+  }
+  return { items: kept, duplicates };
+}
+
+/**
+ * Bo'laklardan kelgan bandlarni birlashtiradi. Overlap sababli bir band bir
+ * necha bo'lakda chiqadi — dedupeItems ularni (endi YAQIN-dublikat bo'yicha
+ * ham, faqat aniq sarlavha emas) yig'adi.
  */
 export function mergeItems<T extends { title: string; note?: string }>(
   groups: T[][],
 ): { items: T[]; duplicates: number } {
-  const byKey = new Map<string, T>();
-  let duplicates = 0;
-
-  for (const g of groups) {
-    for (const it of g) {
-      if (!it?.title?.trim()) continue;
-      const key = it.title.trim().toLowerCase().replace(/\s+/g, " ");
-      const prev = byKey.get(key);
-      if (!prev) {
-        byKey.set(key, it);
-        continue;
-      }
-      duplicates++;
-      if ((it.note?.length ?? 0) > (prev.note?.length ?? 0)) {
-        byKey.set(key, { ...prev, ...it });
-      }
-    }
-  }
-
-  return { items: [...byKey.values()], duplicates };
+  return dedupeItems(groups.flat());
 }

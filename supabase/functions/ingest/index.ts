@@ -29,7 +29,7 @@ import {
 import { callJson } from "./anthropic.ts";
 import { prefilter, stripNoise } from "./prefilter.ts";
 import { extractIds, missingIds, uncoveredLines } from "./identifiers.ts";
-import { type Block, chunkBlocks, mergeItems } from "./chunker.ts";
+import { type Block, chunkBlocks, mergeItems, dedupeItems, isDuplicateTitle } from "./chunker.ts";
 
 interface InMessage {
   id: string;
@@ -683,11 +683,17 @@ async function runPipeline(
 
     for (const it of r.data?.items ?? []) {
       if (!it?.title?.trim()) continue;
-      const dup = items.some(
-        (x) => x.title.trim().toLowerCase() === it.title.trim().toLowerCase(),
-      );
+      // Yaqin-dublikat bo'yicha: retry bir ishni boshqacha so'z bilan qaytaradi.
+      const dup = items.some((x) => isDuplicateTitle(x.title, it.title));
       if (!dup) { items.push(it); recovered++; }
     }
+  }
+
+  // Yakuniy yaqin-dublikat dedup: overlap/retry qoldirgan bo'lsa ham, staging'ga
+  // toza ro'yxat boradi (jonli muammo: 13 ta yubordik, 23 chiqdi).
+  {
+    const dd = dedupeItems(items);
+    if (dd.duplicates > 0) items.splice(0, items.length, ...dd.items);
   }
 
   if (items.length === 0) {
